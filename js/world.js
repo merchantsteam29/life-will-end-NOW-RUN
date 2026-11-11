@@ -1,0 +1,169 @@
+// The drowned city: level geometry (merged by material), the skyline, the water, rain and signs.
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { KIND } from './levels.js';
+
+const canvasTex = (w, h, draw, repeat = true) => {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; return t;
+};
+let TEX = null;
+function textures() {
+  if (TEX) return TEX;
+  TEX = {
+    concrete: canvasTex(256, 256, (g, w, h) => {
+      g.fillStyle = '#25232c'; g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 1400; i++) { const v = 30 + Math.random() * 22 | 0; g.fillStyle = `rgba(${v},${v - 2},${v + 6},0.5)`; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+      g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2);
+      g.strokeStyle = 'rgba(255,255,255,0.05)'; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+    }),
+    wall: canvasTex(256, 256, (g, w, h) => {
+      g.fillStyle = '#1d1c24'; g.fillRect(0, 0, w, h);
+      for (let y = 0; y < h; y += 32) { g.fillStyle = 'rgba(255,255,255,0.03)'; g.fillRect(0, y, w, 2); }
+      for (let i = 0; i < 600; i++) { g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(Math.random() * w, Math.random() * h, 1 + Math.random() * 3, 1); }
+    }),
+    run: canvasTex(256, 256, (g, w, h) => {
+      g.fillStyle = '#16202a'; g.fillRect(0, 0, w, h);
+      for (let x = 0; x < w; x += 64) { g.fillStyle = 'rgba(47,232,255,0.07)'; g.fillRect(x, 0, 30, h); }
+      g.fillStyle = 'rgba(47,232,255,0.9)'; g.fillRect(0, h * 0.46, w, 6); // the runnable stripe
+    }),
+    hazard: canvasTex(128, 128, (g, w, h) => { g.fillStyle = '#e8b21a'; g.fillRect(0, 0, w, h); g.fillStyle = '#16141a'; for (let i = -h; i < w; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 16, 0); g.lineTo(i + 16 + h, h); g.lineTo(i + h, h); g.fill(); } }),
+    windows: canvasTex(128, 256, (g, w, h) => {
+      g.fillStyle = '#05050a'; g.fillRect(0, 0, w, h);
+      const cols = ['#ff2f6d', '#2fe8ff', '#ffd23a', '#9b6bff', '#e8f0ff'];
+      for (let y = 6; y < h; y += 10) for (let x = 4; x < w; x += 9) if (Math.random() < 0.28) { g.fillStyle = cols[Math.random() * cols.length | 0]; g.globalAlpha = 0.25 + Math.random() * 0.7; g.fillRect(x, y, 5, 5); }
+      g.globalAlpha = 1;
+    }),
+  };
+  return TEX;
+}
+
+// box geometry with UVs scaled to world size, so textures don't stretch
+function boxGeo(b) {
+  const sx = b.max[0] - b.min[0], sy = b.max[1] - b.min[1], sz = b.max[2] - b.min[2];
+  const g = new THREE.BoxGeometry(sx, sy, sz);
+  const uv = g.attributes.uv, n = g.attributes.normal;
+  for (let i = 0; i < uv.count; i++) {
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i));
+    const [u, v] = ax > 0.5 ? [sz, sy] : ay > 0.5 ? [sx, sz] : [sx, sy];
+    uv.setXY(i, uv.getX(i) * u / 4, uv.getY(i) * v / 4);
+  }
+  g.translate((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
+  return g;
+}
+
+export function buildWorld(scene, L, ch) {
+  const T = textures();
+  const root = new THREE.Group(); scene.add(root);
+  const neon = new THREE.Color(ch.neon), accent = new THREE.Color(ch.accent);
+  const mats = {
+    [KIND.floor]: new THREE.MeshStandardMaterial({ map: T.concrete, roughness: 0.85, metalness: 0.1 }),
+    [KIND.wall]: new THREE.MeshStandardMaterial({ map: T.wall, roughness: 0.9, metalness: 0.15 }),
+    [KIND.run]: new THREE.MeshStandardMaterial({ map: T.run, emissiveMap: T.run, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.6, metalness: 0.3 }),
+    [KIND.bar]: new THREE.MeshStandardMaterial({ map: T.hazard, roughness: 0.6 }),
+    [KIND.pad]: new THREE.MeshStandardMaterial({ color: 0x111111, emissive: accent, emissiveIntensity: 2.2 }),
+    [KIND.deco]: new THREE.MeshStandardMaterial({ color: 0x15141a, roughness: 0.9 }),
+  };
+  const edgeMat = new THREE.MeshBasicMaterial({ color: neon });
+  const byKind = new Map(), edges = [];
+  for (const b of L.boxes) {
+    if (b.mover) continue;
+    const k = b.kind in mats ? b.kind : KIND.floor;
+    if (!byKind.has(k)) byKind.set(k, []);
+    byKind.get(k).push(boxGeo(b));
+    // a neon strip along the long edges of every walkable top
+    if (k === KIND.floor) {
+      const sx = b.max[0] - b.min[0], sz = b.max[2] - b.min[2], y = b.max[1] + 0.02;
+      if (sz >= sx) for (const x of [b.min[0] + 0.06, b.max[0] - 0.06]) edges.push(boxGeo({ min: [x - 0.05, y - 0.04, b.min[2]], max: [x + 0.05, y + 0.02, b.max[2]] }));
+      else for (const z of [b.min[2] + 0.06, b.max[2] - 0.06]) edges.push(boxGeo({ min: [b.min[0], y - 0.04, z - 0.05], max: [b.max[0], y + 0.02, z + 0.05] }));
+    }
+  }
+  const solid = [];
+  for (const [k, list] of byKind) { const m = new THREE.Mesh(mergeGeometries(list), mats[k]); m.userData.kind = k; root.add(m); solid.push(m); }
+  if (edges.length) root.add(new THREE.Mesh(mergeGeometries(edges), edgeMat));
+  // moving platforms: their own meshes
+  const movers = L.movers.map((b) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]), mats[KIND.floor]);
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(b.max[0] - b.min[0] + 0.1, 0.08, b.max[2] - b.min[2] + 0.1), new THREE.MeshBasicMaterial({ color: accent }));
+    strip.position.y = (b.max[1] - b.min[1]) / 2 - 0.06; m.add(strip);
+    root.add(m); solid.push(m); b.mesh = m; return b;
+  });
+
+  // the skyline: towers all around the route, windows lit
+  const bd = L.bounds, cx = (bd.minX + bd.maxX) / 2, cz = (bd.minZ + bd.maxZ) / 2, span = Math.max(bd.maxX - bd.minX, bd.maxZ - bd.minZ) / 2 + 60;
+  const towerGeo = new THREE.BoxGeometry(1, 1, 1); towerGeo.translate(0, 0.5, 0);
+  const towerMat = new THREE.MeshStandardMaterial({ color: 0x07070c, emissiveMap: T.windows, emissive: 0xffffff, emissiveIntensity: 0.9, roughness: 0.9 });
+  const N = 220, towers = new THREE.InstancedMesh(towerGeo, towerMat, N), M = new THREE.Matrix4(), q = new THREE.Quaternion();
+  let s = ch.id * 977;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  for (let i = 0; i < N; i++) {
+    let x, z, tries = 0;
+    do { const a = rnd() * Math.PI * 2, r = span * (0.35 + rnd() * 1.4); x = cx + Math.cos(a) * r; z = cz + Math.sin(a) * r; tries++; }
+    while (tries < 20 && x > bd.minX - 18 && x < bd.maxX + 18 && z > bd.minZ - 18 && z < bd.maxZ + 18);
+    const w = 8 + rnd() * 22, h = 40 + rnd() * 180;
+    M.compose(new THREE.Vector3(x, L.water, z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 0.3), new THREE.Vector3(w, h, w));
+    towers.setMatrixAt(i, M);
+  }
+  root.add(towers);
+  // the water
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: 0x02040a, roughness: 0.08, metalness: 0.9, emissive: new THREE.Color(ch.neon).multiplyScalar(0.03) }));
+  water.rotation.x = -Math.PI / 2; water.position.set(cx, L.water, cz); root.add(water);
+  // signs: big neon words hung in the air
+  for (const sg of L.signs) {
+    const tex = canvasTex(512, 128, (g, w, h) => { g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, w, h); g.font = '900 78px "Segoe UI", system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = sg.color; g.shadowBlur = 24; g.fillStyle = sg.color; g.fillText(sg.text, w / 2, h / 2); g.fillStyle = '#fff'; g.globalAlpha = 0.6; g.fillText(sg.text, w / 2, h / 2); }, false);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(sg.size * 4, sg.size), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+    m.position.set(...sg.p); m.rotation.y = sg.p[0] < 0 ? Math.PI / 2 : -Math.PI / 2; root.add(m);
+  }
+  // exit beacon
+  let exit = null;
+  if (L.exit) {
+    exit = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.12, 8, 40), new THREE.MeshBasicMaterial({ color: accent }));
+    ring.position.y = 1.8; exit.add(ring);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 60, 24, 1, true), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+    beam.position.y = 30; exit.add(beam);
+    exit.position.set(...L.exit.p); root.add(exit); exit.userData.ring = ring;
+  }
+  // checkpoints: small floor lights
+  const cps = L.checkpoints.map((c) => {
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.8, 32), new THREE.MeshBasicMaterial({ color: 0x555566, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2; m.position.set(c.p[0], c.p[1] + 0.03, c.p[2]); root.add(m); return m;
+  });
+  // rain: a box of streaks that follows the camera
+  let rain = null;
+  if (ch.rain) {
+    const n = 2400, pos = new Float32Array(n * 6);
+    for (let i = 0; i < n; i++) { const x = (Math.random() - 0.5) * 60, y = Math.random() * 40, z = (Math.random() - 0.5) * 60; pos.set([x, y, z, x + 0.05, y - 0.7, z], i * 6); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    rain = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x8aa0c8, transparent: true, opacity: 0.35 }));
+    rain.frustumCulled = false; root.add(rain);
+  }
+  // lights: moonlight, a sky fill, the city's glow from below
+  const hemi = new THREE.HemisphereLight(0x5a6aa0, 0x2a0a20, 1.1); root.add(hemi);
+  const moon = new THREE.DirectionalLight(0xb8c4ff, 1.2); moon.position.set(40, 80, 30); root.add(moon);
+  const glow = new THREE.DirectionalLight(neon, 0.6); glow.position.set(-30, -40, -20); root.add(glow);
+
+  scene.background = new THREE.Color(ch.sky);
+  scene.fog = new THREE.FogExp2(ch.fog[0], ch.fog[1]);
+
+  return {
+    root, solid, movers, exit, cps, rain,
+    update(t, dt, camPos) {
+      for (const b of movers) {
+        const mv = b.mover, o = Math.sin((t + mv.ph) * Math.PI * 2 / mv.period) * mv.amp, ax = mv.axis === 'x' ? 0 : mv.axis === 'y' ? 1 : 2;
+        const before = b.min[ax];
+        b.min[ax] = b.base[0][ax] + o; b.max[ax] = b.base[1][ax] + o;
+        b.delta = [0, 0, 0]; b.delta[ax] = b.min[ax] - before;
+        b.mesh.position.set((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
+      }
+      if (exit) { exit.userData.ring.rotation.y += dt * 1.5; exit.userData.ring.position.y = 1.8 + Math.sin(t * 2) * 0.15; }
+      if (rain) {
+        rain.position.set(Math.round(camPos.x / 4) * 4, camPos.y - 20, Math.round(camPos.z / 4) * 4);
+        const p = rain.geometry.attributes.position.array, fall = dt * 34;
+        for (let i = 0; i < p.length; i += 6) { p[i + 1] -= fall; p[i + 4] -= fall; if (p[i + 4] < -2) { p[i + 1] += 42; p[i + 4] += 42; } } // both ends of a streak wrap together
+        rain.geometry.attributes.position.needsUpdate = true;
+      }
+    },
+    dispose() { scene.remove(root); root.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); },
+  };
+}

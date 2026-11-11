@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LIFE WILL END: NOW RUN</title>
+<meta name="description" content="A first-person parkour shooter in a drowned neon city. Run the walls, cut the bullets, climb the Spire before dawn.">
+<link rel="icon" href="icons/icon.svg">
+<meta name="theme-color" content="#0b0716">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta property="og:title" content="LIFE WILL END: NOW RUN">
+<meta property="og:description" content="Run the walls, cut the bullets, climb the Spire before dawn.">
+<meta property="og:image" content="https://merchantsteam29.github.io/life-will-end-NOW-RUN/cover.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800;900&family=Rajdhani:wght@500;600;700&display=swap">
+<style>
+:root { --pink: #ff2f6d; --cyan: #2fe8ff; --gold: #ffd23a; --ink: #e9ecff; --dim: #8a8fb0; --panel: rgba(8, 6, 20, .82); --line: rgba(47, 232, 255, .25);
+  --f-head: "Orbitron", "Segoe UI", sans-serif; --f-body: "Rajdhani", "Segoe UI", sans-serif; color-scheme: dark; }
+* { box-sizing: border-box; }
+[hidden], .hidden { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #050309; color: var(--ink); font-family: var(--f-body); user-select: none; -webkit-user-select: none; }
+canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+button { font: 700 18px var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); background: transparent; border: 1px solid var(--line); padding: 10px 20px; cursor: pointer; transition: .12s; }
+button:hover:not(:disabled), button:focus-visible { border-color: var(--cyan); color: #fff; background: rgba(47, 232, 255, .08); outline: none; box-shadow: 0 0 18px rgba(47, 232, 255, .25); }
+button.primary { border-color: var(--pink); color: #fff; background: rgba(255, 47, 109, .12); }
+button.primary:hover { background: rgba(255, 47, 109, .25); box-shadow: 0 0 22px rgba(255, 47, 109, .4); border-color: var(--pink); }
+button:disabled { opacity: .35; cursor: default; }
+
+.screen { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px 16px; overflow-y: auto; z-index: 20; background: radial-gradient(ellipse at 50% 30%, rgba(30, 10, 50, .55), rgba(3, 2, 8, .92) 75%); }
+.screen.clear { background: rgba(3, 2, 8, .55); }
+.card { width: min(560px, 100%); display: grid; gap: 12px; text-align: center; }
+.title1 { font: 900 clamp(44px, 9vw, 96px)/.9 var(--f-head); letter-spacing: .04em; color: #fff; text-shadow: 0 0 24px var(--pink), 0 0 2px #fff; margin: 0; position: relative; }
+.title2 { font: 800 clamp(26px, 5vw, 50px)/1 var(--f-head); letter-spacing: .5em; color: var(--cyan); text-shadow: 0 0 18px var(--cyan); margin: 4px 0 6px .5em; animation: flick 5s infinite; }
+@keyframes flick { 0%, 93%, 96%, 100% { opacity: 1 } 94% { opacity: .2 } 95% { opacity: .8 } }
+.glitch { animation: glitch 4s infinite; }
+@keyframes glitch { 0%, 90%, 100% { transform: none; text-shadow: 0 0 24px var(--pink), 0 0 2px #fff } 91% { transform: translateX(-3px) skewX(-6deg); text-shadow: 3px 0 var(--cyan), -3px 0 var(--pink) } 92% { transform: translateX(3px); } }
+.tag { color: var(--dim); font-size: 17px; letter-spacing: .08em; margin: 0 0 8px; }
+.menu { display: grid; gap: 8px; width: min(340px, 100%); margin: 0 auto; }
+.row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.small { font-size: 13px; color: var(--dim); }
+h2 { font: 800 30px var(--f-head); letter-spacing: .12em; margin: 0 0 4px; color: #fff; }
+.chapters { display: grid; gap: 8px; text-align: left; }
+.chapter { display: grid; grid-template-columns: 54px 1fr auto; gap: 12px; align-items: center; padding: 10px 14px; text-transform: none; letter-spacing: 0; }
+.chapter .n { font: 900 26px var(--f-head); color: var(--pink); }
+.chapter b { font: 800 17px var(--f-head); letter-spacing: .08em; display: block; }
+.chapter small { color: var(--dim); font-size: 14px; }
+.chapter .rk { font: 900 24px var(--f-head); color: var(--gold); text-align: right; }
+.chapter .rk small { display: block; font: 600 13px var(--f-body); color: var(--dim); }
+.settings { display: grid; gap: 12px; text-align: left; }
+.settings label { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; font-weight: 600; font-size: 16px; }
+.settings label output { color: var(--cyan); }
+.settings input[type=range] { grid-column: 1 / -1; accent-color: var(--pink); width: 100%; }
+.settings .chk { grid-template-columns: auto 1fr; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; text-align: left; font-size: 16px; }
+.keys dt { color: var(--cyan); font-weight: 700; }
+.keys dd { margin: 0; }
+
+/* HUD */
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#cross { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 1.5px solid rgba(255,255,255,.55); border-radius: 50%; }
+#cross::after { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; background: #fff; border-radius: 50%; }
+#cross.hit { border-color: var(--pink); transform: scale(1.3); }
+#timer { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font: 700 22px var(--f-head); letter-spacing: .1em; text-shadow: 0 0 10px rgba(0,0,0,.8); }
+#chapLbl { position: absolute; top: 16px; left: 18px; font: 700 13px var(--f-head); letter-spacing: .2em; color: var(--dim); }
+#deaths { position: absolute; top: 16px; right: 18px; font: 700 13px var(--f-head); letter-spacing: .15em; color: var(--dim); }
+#ammo { position: absolute; right: 26px; bottom: 26px; display: flex; gap: 5px; align-items: flex-end; }
+#ammo i { width: 7px; height: 22px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transform: skewX(-14deg); }
+#ammo i.off { background: rgba(255,255,255,.12); box-shadow: none; }
+#ammo span { font: 700 13px var(--f-head); color: var(--dim); margin-right: 8px; letter-spacing: .1em; }
+#focus { position: absolute; left: 26px; bottom: 30px; width: 180px; }
+#focus small { font: 700 11px var(--f-head); letter-spacing: .2em; color: var(--dim); }
+#focus div { height: 6px; background: rgba(255,255,255,.1); margin-top: 4px; transform: skewX(-20deg); }
+#focus b { display: block; height: 100%; width: 100%; background: var(--gold); box-shadow: 0 0 10px var(--gold); }
+#radio { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); width: min(640px, 92vw); background: var(--panel); border-left: 3px solid var(--cyan); padding: 10px 16px; font-size: 19px; line-height: 1.35; opacity: 0; transition: opacity .25s; }
+#radio.on { opacity: 1; }
+#radio b { font: 800 12px var(--f-head); letter-spacing: .25em; display: block; margin-bottom: 3px; color: var(--cyan); }
+#radio.halcyon { border-left-color: var(--pink); }
+#radio.halcyon b { color: var(--pink); }
+#radio.halcyon span { font-family: var(--f-head); font-size: 15px; letter-spacing: .06em; color: #ffd0dc; }
+#radio.you { border-left-color: var(--gold); }
+#radio.you b { color: var(--gold); }
+#intro { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; z-index: 15; opacity: 0; transition: opacity .6s; }
+#intro.on { opacity: 1; }
+#intro .num { font: 800 16px var(--f-head); letter-spacing: .6em; color: var(--pink); }
+#intro .nm { font: 900 clamp(36px, 7vw, 72px)/1.05 var(--f-head); letter-spacing: .08em; text-shadow: 0 0 22px var(--pink); }
+#intro .sb { font-size: 20px; color: var(--dim); letter-spacing: .1em; }
+#hint { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); font: 600 18px var(--f-body); color: #fff; text-shadow: 0 0 8px #000; letter-spacing: .05em; opacity: 0; transition: opacity .3s; text-align: center; }
+#hint.on { opacity: .95; }
+#boss { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); width: min(460px, 70vw); text-align: center; }
+#boss small { font: 700 12px var(--f-head); letter-spacing: .35em; color: var(--pink); }
+#boss div { height: 6px; background: rgba(255,255,255,.1); margin-top: 4px; }
+#boss b { display: block; height: 100%; background: var(--pink); box-shadow: 0 0 12px var(--pink); transition: width .3s; }
+#fx { position: fixed; inset: 0; pointer-events: none; z-index: 12; }
+#fx.focus { background: radial-gradient(ellipse at center, transparent 45%, rgba(255, 210, 58, .16) 100%); box-shadow: inset 0 0 120px rgba(255, 210, 58, .25); }
+#flash { position: fixed; inset: 0; pointer-events: none; z-index: 13; background: var(--pink); opacity: 0; mix-blend-mode: screen; }
+#dead { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 14; opacity: 0; font: 900 clamp(30px, 6vw, 60px) var(--f-head); letter-spacing: .3em; color: var(--pink); text-shadow: 0 0 20px var(--pink); background: rgba(40, 0, 10, .35); }
+#dead.on { opacity: 1; }
+.result { display: grid; gap: 4px; font-size: 20px; }
+.result .big { font: 900 96px/1 var(--f-head); color: var(--gold); text-shadow: 0 0 30px var(--gold); }
+.result dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 20px; text-align: left; width: min(320px, 100%); margin: 8px auto; }
+.result dt { color: var(--dim); }
+.result dd { margin: 0; font-weight: 700; }
+.endText p { font-size: 22px; line-height: 1.5; opacity: 0; animation: up .9s forwards; }
+@keyframes up { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+@media (max-height: 560px) { .title1 { font-size: 42px } .title2 { font-size: 22px } .menu button { padding: 7px 14px; font-size: 15px } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="fx"></div><div id="flash"></div>
+<div id="dead">FLATLINED</div>
+<div id="intro"><div><div class="num" id="introNum"></div><div class="nm" id="introName"></div><div class="sb" id="introSub"></div></div></div>
+
+<div id="hud" hidden>
+  <div id="chapLbl"></div><div id="timer">0:00.0</div><div id="deaths"></div>
+  <div id="cross"></div>
+  <div id="boss" hidden><small>HALCYON</small><div><b id="bossBar"></b></div></div>
+  <div id="hint"></div>
+  <div id="radio"><b id="radioWho"></b><span id="radioTxt"></span></div>
+  <div id="focus"><small>FOCUS [Q]</small><div><b id="focusBar"></b></div></div>
+  <div id="ammo"></div>
+</div>
+
+<div id="title" class="screen">
+  <div class="card">
+    <h1 class="title1 glitch">LIFE WILL END</h1>
+    <div class="title2">NOW RUN</div>
+    <p class="tag">The sea gates open at dawn. Climb the Spire. Don't stop.</p>
+    <div class="menu">
+      <button class="primary" id="btnPlay">Start</button>
+      <button id="btnChapters">Chapters</button>
+      <button id="btnHow">How to play</button>
+      <button id="btnSettings">Settings</button>
+      <button id="syncBtn" title="Keep your progress on all your devices">☁ Sync</button>
+      <button id="installApp" style="display:none">Install as an app</button>
+      <button id="pcDownload" title="The Game Library app for Windows: every game in one place">Download for PC</button>
+    </div>
+    <p class="small">Best with a mouse and headphones · controllers work too</p>
+  </div>
+</div>
+
+<div id="chapters" class="screen" hidden>
+  <div class="card"><h2>CHAPTERS</h2><div class="chapters" id="chapList"></div><div class="row"><button data-back>Back</button></div></div>
+</div>
+
+<div id="how" class="screen" hidden>
+  <div class="card">
+    <h2>HOW TO RUN</h2>
+    <dl class="keys">
+      <dt>WASD · Mouse</dt><dd>Move, look</dd>
+      <dt>Space</dt><dd>Jump (once more in the air). Jump at a glowing wall to run along it, jump again to kick off</dd>
+      <dt>C / Ctrl</dt><dd>Slide (while running): under pipes, and it keeps your speed</dd>
+      <dt>Shift</dt><dd>Dash where you're going, once per jump</dd>
+      <dt>Left click</dt><dd>Shoot (6 shots; blade kills give 2 back)</dd>
+      <dt>Right click</dt><dd>Blade: kills up close, and swung as a shot arrives it sends the shot back</dd>
+      <dt>Q (hold)</dt><dd>Focus: time slows; kills refill it</dd>
+      <dt>R</dt><dd>Back to the last checkpoint</dd>
+      <dt>Esc</dt><dd>Pause</dd>
+    </dl>
+    <p class="small">Controller: left stick move, right stick look, A jump, B slide, RB dash, RT shoot, LT / X blade, LB focus, View restart, Start pause.</p>
+    <p class="small">One hit and you're down, but you're straight back at the last checkpoint. Theirs is one hit too.</p>
+    <div class="row"><button data-back>Back</button></div>
+  </div>
+</div>
+
+<div id="settings" class="screen" hidden>
+  <div class="card">
+    <h2>SETTINGS</h2>
+    <div class="settings">
+      <label>Mouse sensitivity <output id="oSens"></output><input type="range" id="sSens" min="0.2" max="3" step="0.05"></label>
+      <label>Controller look <output id="oPad"></output><input type="range" id="sPad" min="0.3" max="2.5" step="0.05"></label>
+      <label>Field of view <output id="oFov"></output><input type="range" id="sFov" min="70" max="110" step="1"></label>
+      <label>Volume <output id="oVol"></output><input type="range" id="sVol" min="0" max="1" step="0.05"></label>
+      <label>Music <output id="oMus"></output><input type="range" id="sMus" min="0" max="1" step="0.05"></label>
+      <label class="chk"><input type="checkbox" id="sInvert"> Invert look up / down</label>
+      <label class="chk"><input type="checkbox" id="sBob"> Head bob</label>
+      <label class="chk"><input type="checkbox" id="sShake"> Screen shake and flashes</label>
+      <label class="chk"><input type="checkbox" id="sAuto"> Auto resolution (lowers it when the frame rate drops)</label>
+      <label class="chk"><input type="checkbox" id="sPads"> Controllers (turn off if the view moves by itself)</label>
+    </div>
+    <div class="row"><button id="fsBtn">Fullscreen</button><button data-back>Done</button></div>
+  </div>
+</div>
+
+<div id="pause" class="screen clear" hidden>
+  <div class="card"><h2>PAUSED</h2>
+    <div class="menu"><button class="primary" id="btnResume">Resume</button><button id="btnCp">Back to checkpoint</button><button id="btnRestart">Restart chapter</button><button id="btnPSettings">Settings</button><button id="btnQuit">Quit to title</button></div>
+    <p class="small" id="pauseInfo"></p>
+  </div>
+</div>
+
+<div id="result" class="screen" hidden>
+  <div class="card result">
+    <h2 id="resTitle">CHAPTER CLEAR</h2>
+    <div class="big" id="resRank">S</div>
+    <dl id="resStats"></dl>
+    <div class="row"><button class="primary" id="btnNext">Next chapter</button><button id="btnAgain">Run it again</button><button id="btnMenu">Title</button></div>
+  </div>
+</div>
+
+<div id="ending" class="screen" hidden>
+  <div class="card endText" id="endText"></div>
+</div>
+
+<script src="sync.js"></script>
+<script type="module" src="js/main.js"></script>
+<script src="install.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a0a2e"/><stop offset="1" stop-color="#05030a"/></linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#sky)"/>
+  <g fill="#0c0a18"><rect x="40" y="250" width="70" height="262"/><rect x="120" y="180" width="60" height="332"/><rect x="330" y="200" width="64" height="312"/><rect x="404" y="270" width="70" height="242"/></g>
+  <g fill="#2fe8ff" opacity=".7"><rect x="52" y="270" width="8" height="8"/><rect x="80" y="300" width="8" height="8"/><rect x="134" y="210" width="8" height="8"/><rect x="156" y="250" width="8" height="8"/><rect x="346" y="230" width="8" height="8"/><rect x="420" y="300" width="8" height="8"/></g>
+  <polygon points="228,92 284,92 300,512 212,512" fill="#151226"/>
+  <rect x="0" y="430" width="512" height="82" fill="#05040c" opacity=".85"/>
+  <g filter="url(#glow)">
+    <path d="M150 400 L362 120" stroke="#ff2f6d" stroke-width="22" stroke-linecap="round"/>
+    <path d="M150 400 L362 120" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".9"/>
+  </g>
+  <text x="256" y="476" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="58" fill="#2fe8ff" text-anchor="middle" letter-spacing="10" filter="url(#glow)">RUN</text>
+</svg>
