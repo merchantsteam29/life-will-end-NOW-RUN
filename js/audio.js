@@ -16,6 +16,29 @@ export function initAudio() {
 export function setVolume(m, mu) { vol.master = m; vol.music = mu; if (master) master.gain.value = m; if (musicBus) musicBus.gain.value = mu * 0.5; }
 export function suspend(on) { if (!ac) return; if (on) ac.suspend().catch(() => {}); else ac.resume().catch(() => {}); }
 const now = () => ac.currentTime;
+
+// ---------- surround: sounds placed in the world, heard from where your head is ----------
+let spatial = true;
+export function setSpatial(on) { spatial = !!on; }
+// move the listener with the camera (pos, forward and up are THREE vectors)
+export function setListener(p, fw, up) {
+  if (!ac) return;
+  const L = ac.listener, t = now();
+  if (L.positionX) {
+    L.positionX.setTargetAtTime(p.x, t, 0.02); L.positionY.setTargetAtTime(p.y, t, 0.02); L.positionZ.setTargetAtTime(p.z, t, 0.02);
+    L.forwardX.setTargetAtTime(fw.x, t, 0.02); L.forwardY.setTargetAtTime(fw.y, t, 0.02); L.forwardZ.setTargetAtTime(fw.z, t, 0.02);
+    L.upX.setTargetAtTime(up.x, t, 0.02); L.upY.setTargetAtTime(up.y, t, 0.02); L.upZ.setTargetAtTime(up.z, t, 0.02);
+  } else { L.setPosition?.(p.x, p.y, p.z); L.setOrientation?.(fw.x, fw.y, fw.z, up.x, up.y, up.z); }
+}
+// a one-shot output at a point in the world; the panner is dropped when the sound ends
+function at(p, ref = 4) {
+  if (!ac || !p) return sfxBus;
+  const pn = ac.createPanner();
+  pn.panningModel = spatial ? 'HRTF' : 'equalpower'; pn.distanceModel = 'inverse'; pn.refDistance = ref; pn.rolloffFactor = 1.1; pn.maxDistance = 200;
+  if (pn.positionX) { pn.positionX.value = p.x; pn.positionY.value = p.y; pn.positionZ.value = p.z; } else pn.setPosition(p.x, p.y, p.z);
+  pn.connect(sfxBus); setTimeout(() => { try { pn.disconnect(); } catch { /* gone */ } }, 3000);
+  return pn;
+}
 function tone(f, dur, { type = 'sine', gain = 0.2, f2 = null, delay = 0, bus = sfxBus, attack = 0.004 } = {}) {
   if (!ac) return;
   const t = now() + delay, o = ac.createOscillator(), g = ac.createGain();
@@ -36,9 +59,14 @@ export const sfx = {
   reload() { tone(700, 0.05, { type: 'square', gain: 0.06 }); tone(1100, 0.05, { type: 'square', gain: 0.06, delay: 0.12 }); },
   slash() { noise(0.18, { f: 900, f2: 4800, q: 2, gain: 0.35 }); },
   deflect() { tone(2600, 0.25, { type: 'triangle', gain: 0.18, f2: 3800 }); tone(3900, 0.18, { type: 'sine', gain: 0.1, delay: 0.02 }); noise(0.08, { f: 6000, gain: 0.2, type: 'highpass' }); },
-  enemyShot() { tone(820, 0.18, { type: 'sawtooth', gain: 0.06, f2: 300 }); },
-  kill() { noise(0.25, { f: 400, q: 0.7, gain: 0.45, type: 'lowpass' }); tone(140, 0.2, { type: 'square', gain: 0.12, f2: 50 }); tone(880, 0.12, { gain: 0.08, delay: 0.05 }); tone(1320, 0.18, { gain: 0.06, delay: 0.1 }); },
-  clink() { tone(3200, 0.08, { type: 'triangle', gain: 0.07 }); },
+  enemyShot(p, type) { const b = at(p, 5), lo = type === 'sniper' ? 0.6 : type === 'turret' ? 1.4 : 1; tone(820 * lo, 0.18, { type: 'sawtooth', gain: type === 'sniper' ? 0.16 : 0.09, f2: 300 * lo, bus: b }); noise(0.08, { f: 1800 * lo, gain: 0.12, bus: b }); },
+  // the tell before a warden fires: a rising whine from where it stands
+  tele(p, type, dur) { const b = at(p, 4); if (type === 'sniper') tone(500, dur, { type: 'sine', gain: 0.1, f2: 2400, bus: b, attack: 0.05 }); else tone(380, Math.min(0.6, dur), { type: 'triangle', gain: 0.07, f2: 1100, bus: b, attack: 0.03 }); },
+  whiz(p) { noise(0.22, { f: 3200, f2: 900, q: 4, gain: 0.22, bus: at(p, 1.5) }); },
+  impact(p) { const b = at(p, 3); noise(0.07, { f: 2600, q: 1.2, gain: 0.16, bus: b }); tone(1900 + Math.random() * 600, 0.04, { type: 'triangle', gain: 0.04, bus: b }); },
+  thud(p) { noise(0.06, { f: 160, type: 'lowpass', gain: 0.3, bus: at(p, 3) }); },
+  kill(p) { const b = at(p, 6); noise(0.25, { f: 400, q: 0.7, gain: 0.45, type: 'lowpass', bus: b }); tone(140, 0.2, { type: 'square', gain: 0.12, f2: 50, bus: b }); tone(880, 0.12, { gain: 0.08, delay: 0.05 }); tone(1320, 0.18, { gain: 0.06, delay: 0.1 }); },
+  clink(p) { tone(3200, 0.08, { type: 'triangle', gain: 0.09, bus: at(p, 4) }); },
   die() { noise(0.6, { f: 3000, f2: 200, q: 0.5, gain: 0.5 }); tone(400, 0.5, { type: 'sawtooth', gain: 0.15, f2: 40 }); },
   jump() { noise(0.1, { f: 500, gain: 0.12, type: 'lowpass' }); },
   airjump() { tone(420, 0.14, { type: 'triangle', gain: 0.07, f2: 900 }); noise(0.1, { f: 1500, gain: 0.1 }); },
@@ -52,7 +80,7 @@ export const sfx = {
   radio() { noise(0.12, { f: 2000, q: 3, gain: 0.08 }); tone(1800, 0.04, { type: 'square', gain: 0.03 }); },
   type() { tone(1400 + Math.random() * 400, 0.015, { type: 'square', gain: 0.012 }); },
   clear() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.5, { type: 'triangle', gain: 0.1, delay: i * 0.1 })); },
-  bossHit() { tone(90, 0.8, { type: 'sawtooth', gain: 0.3, f2: 40 }); noise(0.5, { f: 600, gain: 0.4 }); },
+  bossHit(p) { const b = at(p, 12); tone(90, 0.8, { type: 'sawtooth', gain: 0.3, f2: 40, bus: b }); noise(0.5, { f: 600, gain: 0.4, bus: b }); },
 };
 
 // ---------- music: a slow synthwave loop (bass, arpeggio, pad), key and tempo per chapter ----------

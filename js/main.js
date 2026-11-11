@@ -4,8 +4,10 @@ import { CHAPTERS, buildChapter } from './levels.js';
 import { buildWorld } from './world.js';
 import { Player } from './player.js';
 import { Enemies } from './enemies.js';
+import { makeViewmodel } from './models.js';
 import { Input, LABELS } from './input.js';
-import { initAudio, sfx, music, setVolume, suspend } from './audio.js';
+import { initAudio, sfx, music, setVolume, suspend, setListener, setSpatial } from './audio.js';
+import { voice } from './voice.js';
 import { createGovernor } from '../perf.js';
 
 const $ = (id) => document.getElementById(id);
@@ -14,7 +16,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('lwe.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('lwe.' + k, JSON.stringify(v)); } catch { /* full or blocked */ } },
 };
-const DEF = { sens: 1, padSens: 1, touchSens: 1, fov: 95, vol: 0.8, music: 0.55, invert: false, bob: true, shake: true, autoRes: true, pads: true, rumble: true };
+const DEF = { sens: 1, padSens: 1, touchSens: 1, fov: 95, vol: 0.8, music: 0.55, invert: false, bob: true, shake: true, autoRes: true, pads: true, rumble: true, voices: true, voiceVol: 1, surround: true };
 const settings = { ...DEF, ...store.get('settings', {}) };
 const progress = { unlocked: 1, best: {}, ...store.get('progress', {}) };
 const stats = { kills: 0, blade: 0, deflects: 0, deaths: 0, chapters: 0, ...store.get('stats', {}) };
@@ -36,22 +38,8 @@ vmScene.add(new THREE.HemisphereLight(0x8899ff, 0x220a20, 1.6)); const vmKey = n
 function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = vmCam.aspect = w / h; camera.updateProjectionMatrix(); vmCam.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-const VM = (() => {
-  const g = new THREE.Group(); vmScene.add(g); g.scale.setScalar(0.62); g.position.set(0.04, -0.02, -0.08);
-  const dark = new THREE.MeshStandardMaterial({ color: 0x4a5068, metalness: 0.35, roughness: 0.45 });
-  const neonC = new THREE.MeshBasicMaterial({ color: 0x2fe8ff }), neonP = new THREE.MeshBasicMaterial({ color: 0xff2f6d });
-  const gun = new THREE.Group(); gun.position.set(0.24, -0.22, -0.45); g.add(gun);
-  const box = (w, h, d, m, x, y, z, p) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); p.add(o); return o; };
-  box(0.07, 0.09, 0.32, dark, 0, 0, -0.06, gun); box(0.02, 0.012, 0.24, neonC, 0.036, 0.02, -0.07, gun); box(0.02, 0.012, 0.24, neonC, -0.036, 0.02, -0.07, gun); box(0.05, 0.13, 0.06, dark, 0, -0.1, 0.06, gun).rotation.x = 0.3;
-  box(0.04, 0.04, 0.1, dark, 0, 0.005, -0.26, gun);
-  const muzzle = new THREE.PointLight(0x2fe8ff, 0, 3); muzzle.position.set(0, 0, -0.35); gun.add(muzzle);
-  const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), new THREE.MeshBasicMaterial({ color: 0x9ff8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); flash.position.set(0, 0.005, -0.34); gun.add(flash);
-  const blade = new THREE.Group(); blade.position.set(-0.28, -0.24, -0.4); g.add(blade);
-  box(0.04, 0.04, 0.16, dark, 0, 0, 0.05, blade); box(0.09, 0.015, 0.03, dark, 0, 0, -0.04, blade);
-  const edge = box(0.012, 0.035, 0.75, neonP, 0, 0, -0.42, blade);
-  blade.rotation.set(0.35, 0.3, 0.75);
-  return { g, gun, blade, edge, muzzle, flash, kick: 0, swing: 0 };
-})();
+const VM = makeViewmodel(); vmScene.add(VM.g); VM.g.scale.setScalar(0.62); VM.g.position.set(0.04, -0.02, -0.08);
+VM.blade.rotation.set(0.35, 0.3, 0.75);
 
 // ---------- prompts: the names of the buttons on whatever you're holding ----------
 function keyNames() {
@@ -101,13 +89,16 @@ function loadChapter(id) {
   world = buildWorld(scene, L, ch); boxes = L.boxes;
   enemies = new Enemies(scene, ch.neon);
   enemies.onCoreHit = (core) => {
-    sfx.bossHit(); shake = 1; flashT = 0.4;
+    sfx.bossHit(enemies.center(core)); shake = 1; flashT = 0.4;
     const lines = [[{ who: 'HALCYON', t: 'YOU CANNOT CUT THE SEA.' }], [{ who: 'HALCYON', t: 'STOP. STOP. THE WATER IS ALREADY HERE.' }]][2 - core.hp] || [];
     queue([...lines, { who: 'WREN', t: core.hp === 2 ? "It's re-arming! Drones incoming. Hit it again when the shell opens!" : 'One more!' }]);
     for (let i = 0; i < 2; i++) { const a = Math.random() * 6.28; enemies.spawn({ type: 'drone', p: [core.home.x + Math.cos(a) * 12, core.home.y + 1, core.home.z + Math.sin(a) * 12] }, 1000 + Math.floor(Math.random() * 1e6)).aware = true; }
   };
-  enemies.onKill = onKill; enemies.onHit = () => die('shot'); enemies.onTouch = () => die('charger'); enemies.onFire = () => sfx.enemyShot();
-  radioQ = []; radioCur = null; radioT = 0.6; $('radio').classList.remove('on'); hintT = 0; $('hint').classList.remove('on');
+  enemies.onKill = onKill; enemies.onHit = () => die('shot'); enemies.onTouch = () => die('charger'); 
+  enemies.onFire = (e) => sfx.enemyShot(enemies.center(e), e.type); enemies.onTele = (e) => sfx.tele(enemies.center(e), e.type, e.T.tele);
+  enemies.onWhiz = (b) => sfx.whiz(b.pos); enemies.onStep = (e) => sfx.thud(e.pos);
+  enemies.onImpact = (p) => { if (p.distanceTo(camera.position) < 40) sfx.impact(p); };
+  radioQ = []; radioCur = null; radioT = 0.6; voice.cancel(); $('radio').classList.remove('on'); hintT = 0; $('hint').classList.remove('on');
   cpIdx = -1; deadAtCp = new Set(); saidDone = new Set(); runT = 0; deaths = 0; kills = 0; bossKilled = false; chapterDeaths = 0;
   spawnFromCheckpoint();
   // compile every shader now, under the title card, so the first look at things doesn't stutter
@@ -133,14 +124,14 @@ function startChapter(id) {
   if (input.touchMode && !document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
 }
 function onKill(e, how) {
-  kills++; stats.kills++; sfx.kill(); input.rumble(0.3, 0.5, 80);
+  kills++; stats.kills++; sfx.kill(enemies.center(e)); input.rumble(0.3, 0.5, 80);
   if (how === 'blade') { stats.blade++; ammo = Math.min(6, ammo + 2); }
   if (how === 'deflect') stats.deflects++;
   focus = Math.min(1, focus + 0.25);
   $('cross').classList.add('hit'); setTimeout(() => $('cross').classList.remove('hit'), 120);
   shake = Math.max(shake, 0.25);
-  if (e.type === 'core') { bossKilled = true; sfx.bossHit(); }
-  if (e.type === 'pylon') { sfx.bossHit(); const left = enemies.list.filter((o) => o.type === 'pylon' && !o.dead).length; hint(left ? `PYLON DOWN · ${left} LEFT` : 'THE CORE IS OPEN · CUT IT', 2.5); if (!left) queue([{ who: 'WREN', t: 'Its shield is down! Get up there and cut it!' }]); }
+  if (e.type === 'core') { bossKilled = true; sfx.bossHit(enemies.center(e)); }
+  if (e.type === 'pylon') { sfx.bossHit(enemies.center(e)); const left = enemies.list.filter((o) => o.type === 'pylon' && !o.dead).length; hint(left ? `PYLON DOWN · ${left} LEFT` : 'THE CORE IS OPEN · CUT IT', 2.5); if (!left) queue([{ who: 'WREN', t: 'Its shield is down! Get up there and cut it!' }]); }
   saveAll();
 }
 function die(why) {
@@ -188,8 +179,9 @@ function showEnding() {
     `<p style="animation-delay:${ENDING.length * 2.4}s;font-family:var(--f-head);font-size:28px;letter-spacing:.2em;color:var(--gold)">LIFE DID NOT END</p>` +
     `<div class="row" style="opacity:0;animation:up .9s forwards;animation-delay:${ENDING.length * 2.4 + 1.5}s"><button class="primary" id="btnEndMenu">Title</button></div>`;
   $('btnEndMenu').onclick = toTitle;
+  if (settings.voices) { voice.cancel(); ENDING.forEach((l, i) => setTimeout(() => { if (mode !== 'ending') return; const m = l.match(/^WREN: "(.*)"$/); voice.say(m ? 'WREN' : 'NARRATOR', m ? m[1] : l); }, i * 2400 + 400)); setTimeout(() => mode === 'ending' && voice.say('NARRATOR', 'Life did not end.'), ENDING.length * 2400 + 600); }
 }
-function toTitle() { document.body.classList.remove('playing'); titleLoaded = false; mode = 'title'; input.unlock(); show('hud', false); screens('title'); music(0, 0.3); refreshTitle(); if (world) { world.dispose(); world = null; } if (enemies) enemies.clear(); }
+function toTitle() { voice.cancel(); document.body.classList.remove('playing'); titleLoaded = false; mode = 'title'; input.unlock(); show('hud', false); screens('title'); music(0, 0.3); refreshTitle(); if (world) { world.dispose(); world = null; } if (enemies) enemies.clear(); }
 
 // ---------- the radio ----------
 function queue(lines) { radioQ.push(...lines); }
@@ -198,12 +190,13 @@ function updateRadio(dt) {
     radioCur.t += dt;
     const full = fillKeys(radioCur.line.t), shown = Math.min(full.length, Math.floor(radioCur.t * 55));
     if (shown > radioCur.shown) { radioCur.shown = shown; if (shown % 3 === 0) sfx.type(); $('radioTxt').textContent = full.slice(0, shown); }
-    if (radioCur.t > 1.6 + full.length * 0.045) { radioCur = null; $('radio').classList.remove('on'); radioT = 0.25; }
+    if (radioCur.t > (radioCur.spoken ? 0.5 + full.length * 0.03 : 1.6 + full.length * 0.045) && (radioCur.spoken !== false || radioCur.t > 16)) { radioCur = null; $('radio').classList.remove('on'); radioT = 0.25; }
     return;
   }
   radioT -= dt;
   if (radioT <= 0 && radioQ.length) {
     const line = radioQ.shift(); radioCur = { line, t: 0, shown: 0 };
+    if (settings.voices) { const cur = radioCur; cur.spoken = false; setTimeout(() => { if (radioCur === cur) voice.say(line.who, fillKeys(line.t), () => { cur.spoken = true; }); }, 180); }
     $('radioWho').textContent = line.who; $('radioTxt').textContent = '';
     $('radio').className = 'on ' + (line.who === 'HALCYON' ? 'halcyon' : line.who === 'YOU' ? 'you' : '');
     sfx.radio();
@@ -243,8 +236,8 @@ function updatePlay(dt, rawDt) {
       }
       const r = enemies.shoot(camera.position.clone(), aim, boxes);
       input.rumble(0.15, 0.35, 60);
-      if (!r.enemy && r.wall) enemies.spark(r.point, 0x9ff8ff, 4);
-      if (r.blocked) sfx.clink();
+      if (!r.enemy && r.wall) { enemies.spark(r.point, 0x9ff8ff, 4); sfx.impact(r.point); }
+      if (r.blocked) sfx.clink(r.point);
       if (ammo === 0) reloadT = 1.0;
     } else if (fireHit) { sfx.empty(); if (reloadT <= 0) reloadT = 1.0; }
   }
@@ -303,12 +296,12 @@ function updateVM(dt) {
   const s = VM.swing, k = s > 0 ? 1 - s : 0, arc = s > 0 ? Math.sin(Math.min(1, k * 1.6) * Math.PI) : 0;
   VM.blade.position.set(-0.36 + arc * 0.36, -0.32 + arc * 0.18 + bob, -0.6 - arc * 0.08);
   VM.blade.rotation.set(0.35 - arc * 0.6, 0.3 + arc * 1.2, 0.75 - arc * 2.1);
-  VM.edge.material.color.setHex(deflectT > 0 ? 0x9ff8ff : 0xff2f6d);
+  const ec = deflectT > 0 ? 0x9ff8ff : 0xff2f6d; VM.edge.material.color.setHex(ec); VM.edgeGlow.material.color.setHex(ec); VM.edgeGlow.material.opacity = 0.3 + arc * 0.6;
   VM.g.rotation.z = player.roll * 0.6;
 }
 
 // ---------- main loop ----------
-let last = performance.now();
+let last = performance.now(); const _fw = new THREE.Vector3(), _up = new THREE.Vector3();
 function frame(now) {
   requestAnimationFrame(frame);
   const raw = Math.min(0.1, (now - last) / 1000); last = now;
@@ -328,6 +321,7 @@ function frame(now) {
     flashT = Math.max(0, flashT - raw); $('flash').style.opacity = settings.shake ? (flashT * 1.2).toFixed(2) : 0;
     shake = Math.max(0, shake - raw * 2.5);
     if (settings.shake && shake > 0) { camera.position.x += (Math.random() - 0.5) * shake * 0.15; camera.position.y += (Math.random() - 0.5) * shake * 0.15; }
+    camera.getWorldDirection(_fw); _up.set(0, 1, 0).applyQuaternion(camera.quaternion); setListener(camera.position, _fw, _up);
     renderer.autoClear = true; renderer.render(scene, camera);
     renderer.autoClear = false; renderer.clearDepth(); renderer.render(vmScene, vmCam);
   } else if (mode === 'paused' && world) {
@@ -357,8 +351,8 @@ function titleScene(dt) {
 
 // ---------- pause / menus ----------
 function pause(on) {
-  if (on && (mode === 'play' || mode === 'dead')) { document.body.classList.remove('playing'); mode = 'paused'; input.unlock(); screens('pause'); $('pauseInfo').textContent = `${ch.name} · ${fmt(runT)} · deaths ${deaths}`; suspend(false); $('btnResume').focus(); }
-  else if (!on && mode === 'paused') { document.body.classList.add('playing'); screens(null); mode = player.alive ? 'play' : 'dead'; input.lock(); last = performance.now(); }
+  if (on && (mode === 'play' || mode === 'dead')) { document.body.classList.remove('playing'); mode = 'paused'; input.unlock(); screens('pause'); $('pauseInfo').textContent = `${ch.name} · ${fmt(runT)} · deaths ${deaths}`; suspend(false); voice.pause(); $('btnResume').focus(); }
+  else if (!on && mode === 'paused') { document.body.classList.add('playing'); screens(null); mode = player.alive ? 'play' : 'dead'; input.lock(); voice.resume(); last = performance.now(); }
 }
 document.addEventListener('pointerlockchange', () => { if (!input.locked && mode === 'play' && !input.padMode && !input.touchMode && !TEST) pause(true); });
 canvas.addEventListener('click', () => { if (mode === 'play' && !input.locked && !input.padMode && !input.touchMode) input.lock(); });
@@ -394,10 +388,10 @@ function openSettings() {
   screens('settings');
   const bind = (id, key, fmtv) => { const el = $(id), out = $('o' + id.slice(1)); el.value = settings[key]; if (out) out.textContent = fmtv(settings[key]); el.oninput = () => { settings[key] = +el.value; if (out) out.textContent = fmtv(settings[key]); apply(); }; };
   bind('sSens', 'sens', (v) => v.toFixed(2)); bind('sPad', 'padSens', (v) => v.toFixed(2)); bind('sFov', 'fov', (v) => v + '°');
-  bind('sTouch', 'touchSens', (v) => v.toFixed(2)); bind('sVol', 'vol', (v) => Math.round(v * 100) + '%'); bind('sMus', 'music', (v) => Math.round(v * 100) + '%');
-  for (const [id, key] of [['sInvert', 'invert'], ['sBob', 'bob'], ['sShake', 'shake'], ['sAuto', 'autoRes'], ['sPads', 'pads'], ['sRumble', 'rumble']]) { const el = $(id); el.checked = !!settings[key]; el.onchange = () => { settings[key] = el.checked; if (key === 'autoRes' && !el.checked) gov.reset(); apply(); }; }
+  bind('sTouch', 'touchSens', (v) => v.toFixed(2)); bind('sVol', 'vol', (v) => Math.round(v * 100) + '%'); bind('sMus', 'music', (v) => Math.round(v * 100) + '%'); bind('sVoice', 'voiceVol', (v) => Math.round(v * 100) + '%');
+  for (const [id, key] of [['sInvert', 'invert'], ['sBob', 'bob'], ['sShake', 'shake'], ['sAuto', 'autoRes'], ['sPads', 'pads'], ['sRumble', 'rumble'], ['sVoices', 'voices'], ['sSurround', 'surround']]) { const el = $(id); el.checked = !!settings[key]; el.onchange = () => { settings[key] = el.checked; if (key === 'autoRes' && !el.checked) gov.reset(); apply(); }; }
 }
-function apply() { setVolume(settings.vol, settings.music); saveAll(); }
+function apply() { setVolume(settings.vol, settings.music); setSpatial(settings.surround); voice.on = settings.voices; voice.vol = settings.voiceVol * settings.vol; if (!settings.voices) voice.cancel(); saveAll(); }
 apply();
 
 // menus with a controller: up / down (stick or D-pad) moves between buttons, A / ✕ presses, B / ○ goes back
@@ -447,7 +441,7 @@ requestAnimationFrame(frame);
 // test hook (only with ?test)
 if (TEST) window.__lw = {
   get mode() { return mode; }, get player() { return player; }, get enemies() { return enemies; }, get L() { return L; }, get ch() { return ch; },
-  get ammo() { return ammo; }, get deaths() { return deaths; }, get cp() { return cpIdx; }, get runT() { return runT; }, input, CHAPTERS, buildChapter,
+  get ammo() { return ammo; }, get radio() { return radioCur; }, voice, queue, get deaths() { return deaths; }, get cp() { return cpIdx; }, get runT() { return runT; }, input, CHAPTERS, buildChapter,
   start: startChapter, finish: finishChapter, die, progress, stats, settings, pause, Player, THREE, refreshPrompts, fillKeys,
   tp(x, y, z) { player.pos.set(x, y, z); player.vel.set(0, 0, 0); },
 };

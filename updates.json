@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.2",
+    "date": "2026-11-11",
+    "title": "Voices, surround sound and new models",
+    "notes": [
+      "Voices: Wren, HALCYON and the courier now speak their radio lines out loud (your system's text to speech), each with their own voice. The ending is read out too. Turn it off or set its volume in Settings.",
+      "Surround sound: enemy shots, their charge-up before firing, bullets whizzing past, charger footsteps, impacts and kills come from where they happen. Best on headphones; switch it off in Settings.",
+      "Every model rebuilt: armoured wardens with helmets, visors and shoulder plates, a hooded long-rifle sniper, a riot-shield warden, a hunched blade-armed charger, rotor drones, twin-barrel turrets, crystal pylons and a new HALCYON core with an iris.",
+      "The wardens move now: they aim at you, recoil when they fire, breathe while they wait and run on two legs.",
+      "Your gun, blade and gloved hands rebuilt, with a glowing edge that flares when you cut."
+    ]
+  },
+  {
     "version": "1.1",
     "date": "2026-11-11",
     "title": "Every controller, and phones",
