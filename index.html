@@ -103,7 +103,36 @@ h2 { font: 800 30px var(--f-head); letter-spacing: .12em; margin: 0 0 4px; color
 .result dd { margin: 0; font-weight: 700; }
 .endText p { font-size: 22px; line-height: 1.5; opacity: 0; animation: up .9s forwards; }
 @keyframes up { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
-@media (max-height: 560px) { .title1 { font-size: 42px } .title2 { font-size: 22px } .menu button { padding: 7px 14px; font-size: 15px } }
+/* touch controls */
+#touch { position: fixed; inset: 0; z-index: 11; display: none; touch-action: none; }
+body.m-touch.playing #touch { display: block; }
+#tZone { position: absolute; inset: 0; }
+#tStick { position: absolute; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.05); display: none; pointer-events: none; }
+#tStick.on { display: block; }
+#tKnob { position: absolute; left: 31px; top: 31px; width: 50px; height: 50px; border-radius: 50%; background: rgba(47,232,255,.45); box-shadow: 0 0 14px rgba(47,232,255,.6); }
+.tb { position: absolute; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); background: rgba(10,8,24,.45); color: #fff; font: 800 12px var(--f-head); letter-spacing: .08em; display: grid; place-items: center; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.tb.on { background: rgba(255,47,109,.45); border-color: var(--pink); }
+.tb[data-t=fire] { right: max(26px, env(safe-area-inset-right)); bottom: 120px; width: 88px; height: 88px; border-color: var(--cyan); }
+.tb[data-t=jump] { right: max(124px, calc(env(safe-area-inset-right) + 98px)); bottom: 30px; width: 84px; height: 84px; }
+.tb[data-t=blade] { right: max(132px, calc(env(safe-area-inset-right) + 106px)); bottom: 132px; width: 68px; height: 68px; border-color: var(--pink); }
+.tb[data-t=dash] { right: max(28px, env(safe-area-inset-right)); bottom: 28px; width: 72px; height: 72px; }
+.tb[data-t=slide] { right: max(220px, calc(env(safe-area-inset-right) + 194px)); bottom: 28px; width: 62px; height: 62px; }
+.tb[data-t=focus] { right: max(40px, env(safe-area-inset-right)); bottom: 226px; width: 58px; height: 58px; border-color: var(--gold); }
+.tb[data-t=pause] { right: max(18px, env(safe-area-inset-right)); top: 10px; width: 44px; height: 44px; border-radius: 10px; font-size: 14px; }
+body.m-touch #focus { bottom: auto; top: 46px; left: 18px; width: 130px; }
+body.m-touch #ammo { right: auto; left: 18px; top: 92px; bottom: auto; }
+body.m-touch #timer { font-size: 18px; top: 10px; }
+body.m-touch #radio { bottom: auto; top: 64px; font-size: 15px; width: min(460px, 60vw); }
+body.m-touch #chapLbl, body.m-touch #deaths { display: none; }
+#rotate { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; text-align: center; padding: 24px; background: #05030a; font: 700 22px var(--f-body); }
+#rotate b { display: block; font: 900 28px var(--f-head); color: var(--cyan); margin-bottom: 10px; }
+@media (orientation: portrait) { body.m-touch.playing #rotate { display: grid; } }
+.only-keys, .only-pad, .only-touch { display: none; }
+body.m-keys .only-keys, body.m-pad .only-pad, body.m-touch .only-touch { display: revert; }
+.padmap { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; text-align: left; font-size: 16px; }
+.padmap dt { color: var(--gold); font-weight: 700; min-width: 70px; }
+.padmap dd { margin: 0; }
+@media (max-height: 560px) { .title1 { font-size: 42px } .title2 { font-size: 22px } .menu { grid-template-columns: 1fr 1fr; width: min(560px, 100%); } .menu button { padding: 7px 14px; font-size: 15px } .tag { margin: 0 } }
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -115,13 +144,20 @@ h2 { font: 800 30px var(--f-head); letter-spacing: .12em; margin: 0 0 4px; color
 <div id="dead">FLATLINED</div>
 <div id="intro"><div><div class="num" id="introNum"></div><div class="nm" id="introName"></div><div class="sb" id="introSub"></div></div></div>
 
+<div id="touch">
+  <div id="tZone"></div>
+  <div id="tStick"><div id="tKnob"></div></div>
+  <div class="tb" data-t="fire">FIRE</div><div class="tb" data-t="jump">JUMP</div><div class="tb" data-t="blade">BLADE</div>
+  <div class="tb" data-t="dash">DASH</div><div class="tb" data-t="slide">SLIDE</div><div class="tb" data-t="focus">FOCUS</div><div class="tb" data-t="pause">II</div>
+</div>
+<div id="rotate"><div><b>TURN YOUR PHONE SIDEWAYS</b>The Spire is wider than it is tall.</div></div>
 <div id="hud" hidden>
   <div id="chapLbl"></div><div id="timer">0:00.0</div><div id="deaths"></div>
   <div id="cross"></div>
   <div id="boss" hidden><small>HALCYON</small><div><b id="bossBar"></b></div></div>
   <div id="hint"></div>
   <div id="radio"><b id="radioWho"></b><span id="radioTxt"></span></div>
-  <div id="focus"><small>FOCUS [Q]</small><div><b id="focusBar"></b></div></div>
+  <div id="focus"><small id="focusLbl">FOCUS [Q]</small><div><b id="focusBar"></b></div></div>
   <div id="ammo"></div>
 </div>
 
@@ -139,7 +175,9 @@ h2 { font: 800 30px var(--f-head); letter-spacing: .12em; margin: 0 0 4px; color
       <button id="installApp" style="display:none">Install as an app</button>
       <button id="pcDownload" title="The Game Library app for Windows: every game in one place">Download for PC</button>
     </div>
-    <p class="small">Best with a mouse and headphones · controllers work too</p>
+    <p class="small only-keys">Best with a mouse and headphones · controllers work too</p>
+    <p class="small only-pad" id="padHello"></p>
+    <p class="small only-touch">Touch controls · play it sideways · headphones help</p>
   </div>
 </div>
 
@@ -161,7 +199,11 @@ h2 { font: 800 30px var(--f-head); letter-spacing: .12em; margin: 0 0 4px; color
       <dt>R</dt><dd>Back to the last checkpoint</dd>
       <dt>Esc</dt><dd>Pause</dd>
     </dl>
-    <p class="small">Controller: left stick move, right stick look, A jump, B slide, RB dash, RT shoot, LT / X blade, LB focus, View restart, Start pause.</p>
+    <h2 style="font-size:20px;margin-top:6px" id="padTitle">CONTROLLER</h2>
+    <dl class="padmap" id="padMap"></dl>
+    <p class="small">Works with Xbox, PlayStation (DualShock 4 / DualSense), Steam Deck and Steam Controller pads. The button names change to match the pad you're holding.</p>
+    <h2 style="font-size:20px;margin-top:6px">TOUCH SCREEN</h2>
+    <p class="small" style="text-align:left">Left thumb anywhere on the left: move. Drag on the right: look (you can drag across FIRE too). Buttons: JUMP, SLIDE (hold), DASH, FIRE (hold), BLADE, FOCUS (hold). Turn your phone sideways.</p>
     <p class="small">One hit and you're down, but you're straight back at the last checkpoint. Theirs is one hit too.</p>
     <div class="row"><button data-back>Back</button></div>
   </div>
@@ -181,6 +223,9 @@ h2 { font: 800 30px var(--f-head); letter-spacing: .12em; margin: 0 0 4px; color
       <label class="chk"><input type="checkbox" id="sShake"> Screen shake and flashes</label>
       <label class="chk"><input type="checkbox" id="sAuto"> Auto resolution (lowers it when the frame rate drops)</label>
       <label class="chk"><input type="checkbox" id="sPads"> Controllers (turn off if the view moves by itself)</label>
+      <label class="chk"><input type="checkbox" id="sRumble"> Controller vibration</label>
+      <label>Touch look speed <output id="oTouch"></output><input type="range" id="sTouch" min="0.3" max="2.5" step="0.05"></label>
+      <p class="small" id="padNow" style="margin:0"></p>
     </div>
     <div class="row"><button id="fsBtn">Fullscreen</button><button data-back>Done</button></div>
   </div>

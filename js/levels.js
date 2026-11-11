@@ -105,9 +105,9 @@ export const CHAPTERS = [
       B.say([W('Walls. Jump at one and keep moving: you\'ll run along it.'), W('Jump again to kick off.')], 6);
       B.checkpoint(8).gap(1).wallrun(14, -1).floor(10).checkpoint(8);
       B.gap(2).wallrun(14, 1).gap(1).floor(8);
-      B.say([W('Low pipe ahead. Slide under it: crouch while you\'re running.')], 4);
+      B.say([W('Low pipe ahead. Slide under it: {slide} while you\'re running.')], 4);
       B.slideBar(3).floor(8).checkpoint(6);
-      B.say([W('Tide wardens. They shoot slow, glowing rounds. Dodge them.'), W('One hit and you\'re done, but so are they. Click to shoot, right-click to cut.')], 4);
+      B.say([W('Tide wardens. They shoot slow, glowing rounds. Dodge them.'), W('One hit and you\'re done, but so are they. {shoot} to shoot, {blade} to cut.')], 4);
       B.arena(26, 16, 4, 3).enemy('gunner', -4, 0, 10).enemy('gunner', 5, 0, 18);
       B.checkpoint(4).gap(4).floor(6);
       B.say([W('Your blade can knock their shots back if you swing as they arrive. Practice on that one.')], 4);
@@ -124,7 +124,7 @@ export const CHAPTERS = [
       B.say([W('Cable Street. Nothing touches the water here, so nothing stops.'), H('COURIER. YOU ARE CARRYING NOTHING. THERE IS NOTHING LEFT TO DELIVER.'), W('Ignore it. Drones ahead: they hover and fire in pairs.')], 8);
       B.gap(2).zigzag(3, 11, -1).floor(10).checkpoint(7);
       B.enemy('drone', 0, 4, 2);
-      B.say([W('Dash: Shift. Straight where you\'re looking, even in the air.')], 6);
+      B.say([W('Dash: {dash}. Straight where you\'re going, even in the air.')], 6);
       B.gap(10).floor(8).checkpoint(6);
       B.arena(22, 12, 3, 7).enemy('drone', -3, 5, 8).enemy('gunner', 3, 0, 14).enemy('drone', 4, 6, 18);
       B.checkpoint(3).gap(2).wallrun(16, -1, { dy: 2 }).gap(1).floor(6);
@@ -148,7 +148,7 @@ export const CHAPTERS = [
       B.checkpoint(4).slideBar(2).floor(6).gap(3).wallrun(14, 1).wallrun(12, -1, { off: 3.4 }).floor(8).checkpoint(6);
       B.mover(12, { axis: 'x', amp: 5, period: 3 }).floor(4).mover(12, { axis: 'y', amp: 4, period: 3 }).floor(10).checkpoint(8);
       B.arena(24, 14, 4, 5).enemy('shield', -3, 0, 8).enemy('shield', 3, 0, 14).enemy('drone', 0, 5, 18);
-      B.say([W('Focus: hold Q. Everything slows down for you. Kills fill it back up.')], 0);
+      B.say([W('Focus: hold {focus}. Everything slows down for you. Kills fill it back up.')], 0);
       B.checkpoint(3).gap(3).climb(4, 2.4, 4, 6).gap(6).floor(10);
       B.say([H('YOU ARE FAST. THE TIDE IS PATIENT.')], 4);
       B.end();

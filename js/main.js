@@ -4,7 +4,7 @@ import { CHAPTERS, buildChapter } from './levels.js';
 import { buildWorld } from './world.js';
 import { Player } from './player.js';
 import { Enemies } from './enemies.js';
-import { Input } from './input.js';
+import { Input, LABELS } from './input.js';
 import { initAudio, sfx, music, setVolume, suspend } from './audio.js';
 import { createGovernor } from '../perf.js';
 
@@ -14,7 +14,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('lwe.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('lwe.' + k, JSON.stringify(v)); } catch { /* full or blocked */ } },
 };
-const DEF = { sens: 1, padSens: 1, fov: 95, vol: 0.8, music: 0.55, invert: false, bob: true, shake: true, autoRes: true, pads: true };
+const DEF = { sens: 1, padSens: 1, touchSens: 1, fov: 95, vol: 0.8, music: 0.55, invert: false, bob: true, shake: true, autoRes: true, pads: true, rumble: true };
 const settings = { ...DEF, ...store.get('settings', {}) };
 const progress = { unlocked: 1, best: {}, ...store.get('progress', {}) };
 const stats = { kills: 0, blade: 0, deflects: 0, deaths: 0, chapters: 0, ...store.get('stats', {}) };
@@ -23,7 +23,8 @@ const saveAll = () => { store.set('settings', settings); store.set('progress', p
 // ---------- renderer ----------
 const canvas = $('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-const baseRatio = () => Math.min(devicePixelRatio, 1.75);
+const COARSE = matchMedia('(pointer: coarse)').matches;
+const baseRatio = () => Math.min(devicePixelRatio, COARSE ? 1.25 : 1.75);
 renderer.setPixelRatio(baseRatio());
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
 const gov = createGovernor({ apply: (s) => { renderer.setPixelRatio(baseRatio() * s); resize(); } });
@@ -52,8 +53,34 @@ const VM = (() => {
   return { g, gun, blade, edge, muzzle, flash, kick: 0, swing: 0 };
 })();
 
+// ---------- prompts: the names of the buttons on whatever you're holding ----------
+function keyNames() {
+  const I = input;
+  if (I.padMode) { const L = LABELS[I.kind] || LABELS.xbox; return { jump: L[0], slide: L[1] + ' (hold)', dash: L[5], shoot: L[7], blade: L[6], focus: L[4], restart: L[8], pause: L[9] }; }
+  if (I.touchMode) return { jump: 'JUMP', slide: 'SLIDE', dash: 'DASH', shoot: 'FIRE', blade: 'BLADE', focus: 'FOCUS', restart: 'pause > checkpoint', pause: 'II' };
+  return { jump: 'Space', slide: 'C', dash: 'Shift', shoot: 'Left click', blade: 'Right click', focus: 'Q', restart: 'R', pause: 'Esc' };
+}
+const fillKeys = (t) => { const k = keyNames(); return t.replace(/\{(\w+)\}/g, (_, n) => k[n] || n); };
+const PAD_NAMES = { xbox: 'Xbox controller', ps: 'PlayStation controller', deck: 'Steam Deck', steam: 'Steam Controller', switch: 'Switch controller' };
+function refreshPrompts() {
+  const I = input, mode2 = I.padMode ? 'pad' : I.touchMode ? 'touch' : 'keys';
+  document.body.classList.remove('m-keys', 'm-pad', 'm-touch'); document.body.classList.add('m-' + mode2);
+  const k = keyNames();
+  $('focusLbl').textContent = mode2 === 'touch' ? 'FOCUS' : `FOCUS [${k.focus}]`;
+  const L = LABELS[I.kind] || LABELS.xbox;
+  $('padTitle').textContent = 'CONTROLLER · ' + (PAD_NAMES[I.kind] || 'controller').toUpperCase();
+  $('padMap').innerHTML = [['Left stick / D-pad', 'Move'], ['Right stick', 'Look'], [L[0], 'Jump (and wall-jump)'], [L[1] + ' / ' + L[11], 'Slide (hold)'], [L[5] + ' / ' + L[10], 'Dash'],
+    [L[7], 'Shoot'], [L[6] + ' / ' + L[2], 'Blade (and deflect)'], [L[4], 'Focus (hold)'], [L[8], 'Back to checkpoint'], [L[9], 'Pause']].map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('');
+  const hello = I.gp ? `${PAD_NAMES[I.kind] || 'Controller'} connected · ${L[0]} to choose, ${L[1]} to go back` : 'Controller ready';
+  $('padHello').textContent = hello; $('padNow').textContent = I.padMode ? hello : 'Plug in or pair a controller and press any button.';
+  if (radioCur) $('radioTxt').textContent = fillKeys(radioCur.line.t).slice(0, radioCur.shown);
+}
+
 // ---------- state ----------
 const input = new Input(canvas);
+input.bindTouch($('touch'));
+input.onKind = () => refreshPrompts();
+document.addEventListener('touchstart', () => { if (!input.padMode && !input.touchMode) { input.setMode('touch'); refreshPrompts(); } }, { passive: true });
 const player = new Player(camera);
 let ch = null, L = null, world = null, enemies = null, boxes = [];
 let mode = 'title'; // title | intro | play | dead | paused | result | ending
@@ -102,10 +129,11 @@ function startChapter(id) {
   mode = 'intro'; introT = TEST ? 0.3 : 2.6;
   $('introNum').textContent = ch.boss ? 'FINAL CHAPTER' : `CHAPTER ${ch.id}`; $('introName').textContent = ch.name; $('introSub').textContent = ch.sub;
   $('intro').classList.add('on');
-  music(ch.id); input.lock();
+  music(ch.id); input.lock(); document.body.classList.add('playing');
+  if (input.touchMode && !document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
 }
 function onKill(e, how) {
-  kills++; stats.kills++; sfx.kill();
+  kills++; stats.kills++; sfx.kill(); input.rumble(0.3, 0.5, 80);
   if (how === 'blade') { stats.blade++; ammo = Math.min(6, ammo + 2); }
   if (how === 'deflect') stats.deflects++;
   focus = Math.min(1, focus + 0.25);
@@ -119,11 +147,12 @@ function die(why) {
   if (mode !== 'play') return;
   if (TEST && window.__lwGod) return;
   player.alive = false; mode = 'dead'; deadT = TEST ? 0.2 : 0.75; deaths++; chapterDeaths++; stats.deaths++;
-  sfx.die(); $('dead').classList.add('on'); flashT = 0.3; shake = 0.6; focusOn = false;
+  sfx.die(); input.rumble(1, 0.8, 350); $('dead').classList.add('on'); flashT = 0.3; shake = 0.6; focusOn = false;
   $('deaths').textContent = `DEATHS ${deaths}`;
 }
 function respawn() { $('dead').classList.remove('on'); spawnFromCheckpoint(); mode = 'play'; }
 function finishChapter() {
+  document.body.classList.remove('playing');
   mode = 'result'; input.unlock(); music(0, 0);
   sfx.clear();
   const par = ch.par, t = runT;
@@ -160,16 +189,16 @@ function showEnding() {
     `<div class="row" style="opacity:0;animation:up .9s forwards;animation-delay:${ENDING.length * 2.4 + 1.5}s"><button class="primary" id="btnEndMenu">Title</button></div>`;
   $('btnEndMenu').onclick = toTitle;
 }
-function toTitle() { titleLoaded = false; mode = 'title'; input.unlock(); show('hud', false); screens('title'); music(0, 0.3); refreshTitle(); if (world) { world.dispose(); world = null; } if (enemies) enemies.clear(); }
+function toTitle() { document.body.classList.remove('playing'); titleLoaded = false; mode = 'title'; input.unlock(); show('hud', false); screens('title'); music(0, 0.3); refreshTitle(); if (world) { world.dispose(); world = null; } if (enemies) enemies.clear(); }
 
 // ---------- the radio ----------
 function queue(lines) { radioQ.push(...lines); }
 function updateRadio(dt) {
   if (radioCur) {
     radioCur.t += dt;
-    const shown = Math.min(radioCur.line.t.length, Math.floor(radioCur.t * 55));
-    if (shown > radioCur.shown) { radioCur.shown = shown; if (shown % 3 === 0) sfx.type(); $('radioTxt').textContent = radioCur.line.t.slice(0, shown); }
-    if (radioCur.t > 1.6 + radioCur.line.t.length * 0.045) { radioCur = null; $('radio').classList.remove('on'); radioT = 0.25; }
+    const full = fillKeys(radioCur.line.t), shown = Math.min(full.length, Math.floor(radioCur.t * 55));
+    if (shown > radioCur.shown) { radioCur.shown = shown; if (shown % 3 === 0) sfx.type(); $('radioTxt').textContent = full.slice(0, shown); }
+    if (radioCur.t > 1.6 + full.length * 0.045) { radioCur = null; $('radio').classList.remove('on'); radioT = 0.25; }
     return;
   }
   radioT -= dt;
@@ -195,7 +224,7 @@ function updatePlay(dt, rawDt) {
   player.update(meDt, I, L, boxes, settings);
   for (const e of player.events) {
     if (e === 'jump') sfx.jump(); else if (e === 'airjump') sfx.airjump(); else if (e === 'dash') sfx.dash(); else if (e === 'land') sfx.land();
-    else if (e === 'wallrun') sfx.wallrun(); else if (e === 'walljump') sfx.jump(); else if (e === 'pad') sfx.pad(); else if (e === 'slide') sfx.dash(); else if (e === 'fell') die('fell');
+    else if (e === 'wallrun') { sfx.wallrun(); input.rumble(0, 0.2, 80); } else if (e === 'walljump') sfx.jump(); else if (e === 'pad') { sfx.pad(); input.rumble(0.5, 0.3, 140); } else if (e === 'slide') sfx.dash(); else if (e === 'fell') die('fell');
   }
   player.events.length = 0;
   if (mode !== 'play') return;
@@ -207,7 +236,13 @@ function updatePlay(dt, rawDt) {
   if ((fire || fireHit) && fireCd <= 0 && reloadT <= 0) {
     if (ammo > 0) {
       ammo--; fireCd = 0.2; sfx.shoot(); VM.kick = 1; shake = Math.max(shake, 0.08);
-      const r = enemies.shoot(camera.position.clone(), player.forward, boxes);
+      let aim = player.forward;
+      if (input.padMode || input.touchMode) {
+        const eye = camera.position, cone = input.touchMode ? 0.12 : 0.075; let best = cone;
+        for (const e of enemies.list) { if (e.dead) continue; const d = enemies.center(e).sub(eye), dist = d.length(); if (dist > 60) continue; const ang = d.normalize().angleTo(player.forward) - Math.atan2(e.T.r, dist); if (ang < best) { best = ang; aim = d.clone(); } }
+      }
+      const r = enemies.shoot(camera.position.clone(), aim, boxes);
+      input.rumble(0.15, 0.35, 60);
       if (!r.enemy && r.wall) enemies.spark(r.point, 0x9ff8ff, 4);
       if (r.blocked) sfx.clink();
       if (ammo === 0) reloadT = 1.0;
@@ -222,7 +257,7 @@ function updatePlay(dt, rawDt) {
   if (deflectT > 0) {
     deflectT -= meDt;
     const n = enemies.deflect(camera.position.clone(), player.forward);
-    if (n) { sfx.deflect(); focus = Math.min(1, focus + 0.1 * n); hint('DEFLECTED', 0.6); }
+    if (n) { sfx.deflect(); input.rumble(0.4, 0.9, 90); focus = Math.min(1, focus + 0.1 * n); hint('DEFLECTED', 0.6); }
   }
   enemies.update(worldDt, player, boxes);
   if (mode !== 'play') return;
@@ -278,7 +313,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const raw = Math.min(0.1, (now - last) / 1000); last = now;
   const dt = Math.min(0.033, raw);
-  input.pollPad(dt); input.padSens = settings.padSens; input.pads = settings.pads;
+  input.pollPad(dt); input.padSens = settings.padSens; input.pads = settings.pads; input.touchSens = settings.touchSens; input.rumbleOn = settings.rumble;
   const P = input.pad;
   if (mode === 'play' || mode === 'dead' || mode === 'intro') {
     if (settings.autoRes) gov.tick(raw);
@@ -300,6 +335,7 @@ function frame(now) {
   } else {
     titleScene(raw);
   }
+  menuNav(raw);
   input.endFrame();
 }
 
@@ -321,11 +357,11 @@ function titleScene(dt) {
 
 // ---------- pause / menus ----------
 function pause(on) {
-  if (on && (mode === 'play' || mode === 'dead')) { mode = 'paused'; input.unlock(); screens('pause'); $('pauseInfo').textContent = `${ch.name} · ${fmt(runT)} · deaths ${deaths}`; suspend(false); $('btnResume').focus(); }
-  else if (!on && mode === 'paused') { screens(null); mode = player.alive ? 'play' : 'dead'; input.lock(); last = performance.now(); }
+  if (on && (mode === 'play' || mode === 'dead')) { document.body.classList.remove('playing'); mode = 'paused'; input.unlock(); screens('pause'); $('pauseInfo').textContent = `${ch.name} · ${fmt(runT)} · deaths ${deaths}`; suspend(false); $('btnResume').focus(); }
+  else if (!on && mode === 'paused') { document.body.classList.add('playing'); screens(null); mode = player.alive ? 'play' : 'dead'; input.lock(); last = performance.now(); }
 }
-document.addEventListener('pointerlockchange', () => { if (!input.locked && mode === 'play' && !input.padMode && !TEST) pause(true); });
-canvas.addEventListener('click', () => { if (mode === 'play' && !input.locked && !input.padMode) input.lock(); });
+document.addEventListener('pointerlockchange', () => { if (!input.locked && mode === 'play' && !input.padMode && !input.touchMode && !TEST) pause(true); });
+canvas.addEventListener('click', () => { if (mode === 'play' && !input.locked && !input.padMode && !input.touchMode) input.lock(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && (mode === 'play' || mode === 'dead')) pause(true); });
 
 let backTo = 'title';
@@ -341,7 +377,7 @@ function chapterList() {
 $('btnPlay').onclick = () => startChapter(Math.min(progress.unlocked, CHAPTERS.length));
 $('btnChapters').onclick = () => { chapterList(); screens('chapters'); };
 $('chapList').onclick = (e) => { const b = e.target.closest('[data-ch]'); if (b && !b.disabled) startChapter(+b.dataset.ch); };
-$('btnHow').onclick = () => screens('how');
+$('btnHow').onclick = () => { refreshPrompts(); screens('how'); };
 $('btnSettings').onclick = () => { backTo = 'title'; openSettings(); };
 $('btnPSettings').onclick = () => { backTo = 'pause'; openSettings(); };
 document.querySelectorAll('[data-back]').forEach((b) => b.addEventListener('click', () => { saveAll(); screens(b.closest('#settings') ? backTo : 'title'); }));
@@ -358,27 +394,32 @@ function openSettings() {
   screens('settings');
   const bind = (id, key, fmtv) => { const el = $(id), out = $('o' + id.slice(1)); el.value = settings[key]; if (out) out.textContent = fmtv(settings[key]); el.oninput = () => { settings[key] = +el.value; if (out) out.textContent = fmtv(settings[key]); apply(); }; };
   bind('sSens', 'sens', (v) => v.toFixed(2)); bind('sPad', 'padSens', (v) => v.toFixed(2)); bind('sFov', 'fov', (v) => v + '°');
-  bind('sVol', 'vol', (v) => Math.round(v * 100) + '%'); bind('sMus', 'music', (v) => Math.round(v * 100) + '%');
-  for (const [id, key] of [['sInvert', 'invert'], ['sBob', 'bob'], ['sShake', 'shake'], ['sAuto', 'autoRes'], ['sPads', 'pads']]) { const el = $(id); el.checked = !!settings[key]; el.onchange = () => { settings[key] = el.checked; if (key === 'autoRes' && !el.checked) gov.reset(); apply(); }; }
+  bind('sTouch', 'touchSens', (v) => v.toFixed(2)); bind('sVol', 'vol', (v) => Math.round(v * 100) + '%'); bind('sMus', 'music', (v) => Math.round(v * 100) + '%');
+  for (const [id, key] of [['sInvert', 'invert'], ['sBob', 'bob'], ['sShake', 'shake'], ['sAuto', 'autoRes'], ['sPads', 'pads'], ['sRumble', 'rumble']]) { const el = $(id); el.checked = !!settings[key]; el.onchange = () => { settings[key] = el.checked; if (key === 'autoRes' && !el.checked) gov.reset(); apply(); }; }
 }
 function apply() { setVolume(settings.vol, settings.music); saveAll(); }
 apply();
 
-// menus with a controller or the keyboard: up / down moves between buttons, A presses, B goes back
+// menus with a controller: up / down (stick or D-pad) moves between buttons, A / ✕ presses, B / ○ goes back
 let navT = 0;
-setInterval(() => {
+function menuNav(dt) {
   if (mode === 'play' || mode === 'dead' || mode === 'intro') return;
-  const P = input.pad; if (!P) return;
+  const P = input.pad; if (!P || P.touch) return;
   const scr = [...document.querySelectorAll('.screen')].find((s) => !s.hidden); if (!scr) return;
   const items = [...scr.querySelectorAll('button, input')].filter((b) => !b.disabled && b.offsetParent);
   if (!items.length) return;
   let i = items.indexOf(document.activeElement);
-  if (P.up || P.downB || (Math.abs(P.mz) > 0.6 && navT <= 0)) { const d = P.up || P.mz > 0.6 ? -1 : 1; i = i < 0 ? 0 : (i + d + items.length) % items.length; items[i].focus(); navT = 0.22; }
-  navT -= 0.05;
-  if (P.a && document.activeElement && items.includes(document.activeElement)) document.activeElement.click();
+  navT -= dt;
+  const v = P.up ? -1 : P.downB ? 1 : Math.abs(P.mz) > 0.6 && navT <= 0 ? (P.mz > 0 ? -1 : 1) : 0;
+  if (v) { i = i < 0 ? 0 : (i + v + items.length) % items.length; items[i].focus(); navT = 0.22; }
+  else if (Math.abs(P.mz) < 0.3) navT = 0;
+  const f = document.activeElement;
+  // left / right nudges a slider
+  if (f && f.type === 'range' && Math.abs(P.mx) > 0.6 && navT <= 0) { f.value = +f.value + Math.sign(P.mx) * (+f.step || 0.05); f.dispatchEvent(new Event('input')); navT = 0.12; }
+  if (P.a && f && items.includes(f)) { if (f.type === 'checkbox') { f.checked = !f.checked; f.dispatchEvent(new Event('change')); } else f.click(); }
   if (P.b) { const back = scr.querySelector('[data-back]') || (mode === 'paused' && $('btnResume')); back?.click(); }
   if (P.pause && mode === 'paused') pause(false);
-}, 50);
+}
 
 // ---------- sync + achievements (sync.js) ----------
 if (window.GameSync) {
@@ -398,7 +439,8 @@ if (window.GameSync) {
 } else $('syncBtn').hidden = true;
 
 // ---------- boot ----------
-refreshTitle();
+if (COARSE) input.setMode('touch');
+refreshTitle(); refreshPrompts();
 document.addEventListener('pointerdown', () => { initAudio(); if (mode === 'title' && !window.__musicOn) { window.__musicOn = true; music(0, 0.3); } }, { once: false });
 requestAnimationFrame(frame);
 
@@ -406,6 +448,6 @@ requestAnimationFrame(frame);
 if (TEST) window.__lw = {
   get mode() { return mode; }, get player() { return player; }, get enemies() { return enemies; }, get L() { return L; }, get ch() { return ch; },
   get ammo() { return ammo; }, get deaths() { return deaths; }, get cp() { return cpIdx; }, get runT() { return runT; }, input, CHAPTERS, buildChapter,
-  start: startChapter, finish: finishChapter, die, progress, stats, settings, pause, Player, THREE,
+  start: startChapter, finish: finishChapter, die, progress, stats, settings, pause, Player, THREE, refreshPrompts, fillKeys,
   tp(x, y, z) { player.pos.set(x, y, z); player.vel.set(0, 0, 0); },
 };

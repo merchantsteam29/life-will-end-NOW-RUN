@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.1",
+    "date": "2026-11-11",
+    "title": "Every controller, and phones",
+    "notes": [
+      "Controllers: Xbox, PlayStation (DualShock 4 and DualSense), Steam Deck and the Steam Controller all work, in Chrome, Edge and Firefox, with or without Steam running.",
+      "Button names follow the pad you are holding: A / B / LB / RT on Xbox, ✕ / ○ / L1 / R2 on PlayStation, L1 / R2 on Steam Deck. Wren's tips use them too.",
+      "Vibration on pads that support it, a little aim help on sticks, and menus you can drive with the D-pad.",
+      "Phones and tablets: a thumb stick, drag to look, and buttons for jump, slide, dash, fire, blade and focus. Play it sideways.",
+      "Settings: controller vibration on or off, touch look speed."
+    ]
+  },
+  {
     "version": "1.0",
     "date": "2026-11-11",
     "title": "Release",
