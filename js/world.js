@@ -111,7 +111,7 @@ export function buildWorld(scene, L, ch) {
   // signs: big neon words hung in the air
   for (const sg of L.signs) {
     const tex = canvasTex(512, 128, (g, w, h) => { g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, w, h); g.font = '900 78px "Segoe UI", system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = sg.color; g.shadowBlur = 24; g.fillStyle = sg.color; g.fillText(sg.text, w / 2, h / 2); g.fillStyle = '#fff'; g.globalAlpha = 0.6; g.fillText(sg.text, w / 2, h / 2); }, false);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(sg.size * 4, sg.size), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(sg.size * 4, sg.size), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
     m.position.set(...sg.p); m.rotation.y = sg.p[0] < 0 ? Math.PI / 2 : -Math.PI / 2; root.add(m);
   }
   // exit beacon
@@ -120,7 +120,7 @@ export function buildWorld(scene, L, ch) {
     exit = new THREE.Group();
     const ring = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.12, 8, 40), new THREE.MeshBasicMaterial({ color: accent }));
     ring.position.y = 1.8; exit.add(ring);
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 60, 24, 1, true), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 60, 24, 1, true), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true }));
     beam.position.y = 30; exit.add(beam);
     exit.position.set(...L.exit.p); root.add(exit); exit.userData.ring = ring;
   }
@@ -133,9 +133,13 @@ export function buildWorld(scene, L, ch) {
   let rain = null;
   if (ch.rain) {
     const n = 2400, pos = new Float32Array(n * 6);
-    for (let i = 0; i < n; i++) { const x = (Math.random() - 0.5) * 60, y = Math.random() * 40, z = (Math.random() - 0.5) * 60; pos.set([x, y, z, x + 0.05, y - 0.7, z], i * 6); }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    rain = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x8aa0c8, transparent: true, opacity: 0.35 }));
+    const top = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) { const x = (Math.random() - 0.5) * 60, y = Math.random() * 42 - 1.3, z = (Math.random() - 0.5) * 60; pos.set([x, y, z, x + 0.05, y - 0.7, z], i * 6); top[i * 2] = top[i * 2 + 1] = y; }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aTop', new THREE.BufferAttribute(top, 1));
+    const rm = new THREE.LineBasicMaterial({ color: 0x8aa0c8, transparent: true, opacity: 0.35 }), uFall = { value: 0 };
+    // both ends of a streak wrap together (they share the streak's top height)
+    rm.onBeforeCompile = (sh) => { sh.uniforms.uFall = uFall; sh.vertexShader = 'attribute float aTop;\nuniform float uFall;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.y += (mod(aTop - uFall + 1.3, 42.0) - 1.3) - aTop;'); };
+    rain = new THREE.LineSegments(g, rm); rain.userData.fall = uFall;
     rain.frustumCulled = false; root.add(rain);
   }
   // lights: moonlight, a sky fill, the city's glow from below
@@ -159,9 +163,7 @@ export function buildWorld(scene, L, ch) {
       if (exit) { exit.userData.ring.rotation.y += dt * 1.5; exit.userData.ring.position.y = 1.8 + Math.sin(t * 2) * 0.15; }
       if (rain) {
         rain.position.set(Math.round(camPos.x / 4) * 4, camPos.y - 20, Math.round(camPos.z / 4) * 4);
-        const p = rain.geometry.attributes.position.array, fall = dt * 34;
-        for (let i = 0; i < p.length; i += 6) { p[i + 1] -= fall; p[i + 4] -= fall; if (p[i + 4] < -2) { p[i + 1] += 42; p[i + 4] += 42; } } // both ends of a streak wrap together
-        rain.geometry.attributes.position.needsUpdate = true;
+        const u = rain.userData.fall; u.value = (u.value + dt * 34) % 4200;
       }
     },
     dispose() { scene.remove(root); root.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); },

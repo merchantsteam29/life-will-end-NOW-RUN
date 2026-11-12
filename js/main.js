@@ -301,7 +301,7 @@ function updateVM(dt) {
 }
 
 // ---------- main loop ----------
-let last = performance.now(); const _fw = new THREE.Vector3(), _up = new THREE.Vector3();
+let last = performance.now(), lastFlash = ''; const _fw = new THREE.Vector3(), _up = new THREE.Vector3();
 function frame(now) {
   requestAnimationFrame(frame);
   const raw = Math.min(0.1, (now - last) / 1000); last = now;
@@ -318,7 +318,7 @@ function frame(now) {
     else if (mode === 'dead') { deadT -= raw; world.update(clock += dt * 0.2, dt * 0.2, camera.position); enemies.update(dt * 0.2, player, boxes); if (deadT <= 0) respawn(); }
     updateRadio(raw); updateHud(); updateVM(raw);
     if (hintT > 0) { hintT -= raw; if (hintT <= 0) $('hint').classList.remove('on'); }
-    flashT = Math.max(0, flashT - raw); $('flash').style.opacity = settings.shake ? (flashT * 1.2).toFixed(2) : 0;
+    flashT = Math.max(0, flashT - raw); { const o = settings.shake ? Math.min(1, flashT * 1.2).toFixed(2) : '0.00'; if (o !== lastFlash) { lastFlash = o; const el = $('flash'); el.style.opacity = o; el.style.display = o === '0.00' ? 'none' : ''; } }
     shake = Math.max(0, shake - raw * 2.5);
     if (settings.shake && shake > 0) { camera.position.x += (Math.random() - 0.5) * shake * 0.15; camera.position.y += (Math.random() - 0.5) * shake * 0.15; }
     camera.getWorldDirection(_fw); _up.set(0, 1, 0).applyQuaternion(camera.quaternion); setListener(camera.position, _fw, _up);

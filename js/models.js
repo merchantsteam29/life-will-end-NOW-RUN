@@ -230,7 +230,7 @@ function shellPlate() {
 
 export function makeModel(type, neon) {
   const glow = new THREE.MeshStandardMaterial({ color: 0x220008, emissive: neon, emissiveIntensity: 2.4, roughness: 0.5, metalness: 0.4 });
-  const energy = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, emissive: type === 'shield' ? 0x2fe8ff : neon, emissiveIntensity: 0.6, transparent: true, opacity: type === 'shield' ? 0.4 : 0.25, depthWrite: false, side: THREE.DoubleSide });
+  const energy = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, emissive: type === 'shield' ? 0x2fe8ff : neon, emissiveIntensity: 0.6, transparent: true, opacity: type === 'shield' ? 0.4 : 0.25, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   const mats = { ...MAT, glow, energy };
   const g = new THREE.Group(), parts = {};
   const inst = (tpl, parent) => {
@@ -331,7 +331,7 @@ export function makeViewmodel() {
   const edge = put(blade, G.box(0.005, 0.016, 0.74), M.neonP, 0, -0.022, -0.44);
   put(blade, G.cone(0.025, 0.11, 4), M.neonP, 0, -0.004, -0.86, -PI / 2, 0, PI / 4).scale.set(0.35, 1, 1);
   const egGeo = new THREE.PlaneGeometry(0.05, 0.84).rotateX(-PI / 2).rotateZ(PI / 2);
-  const edgeGlow = new THREE.Mesh(egGeo, new THREE.MeshBasicMaterial({ color: 0xff2f6d, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  const edgeGlow = new THREE.Mesh(egGeo, new THREE.MeshBasicMaterial({ color: 0xff2f6d, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
   edgeGlow.position.set(0, -0.022, -0.46); blade.add(edgeGlow);
   hand(blade, 0, -0.004, 0.06, 'z', -1);
   arm(blade, [-0.01, -0.03, 0.11], [-0.05, -0.12, 0.5], 0.042, 0.055, M.glove);

@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.2.1",
+    "date": "2026-11-11",
+    "title": "Smoother fights",
+    "notes": [
+      "Fights run much smoother: sparks, bullet glows and bullets are now drawn together instead of one by one (the boss fight runs about 45% faster on slower PCs, with a third fewer draw calls).",
+      "Fixed slowly building up memory during long fights (every enemy shot left a little behind).",
+      "Rain and the see-through shields, blade glow and exit beam cost less to draw."
+    ]
+  },
+  {
     "version": "1.2",
     "date": "2026-11-11",
     "title": "Voices, surround sound and new models",

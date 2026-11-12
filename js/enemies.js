@@ -3,7 +3,32 @@
 import * as THREE from 'three';
 import { makeModel } from './models.js';
 
-const _v = new THREE.Vector3(), _w = new THREE.Vector3();
+const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _d = new THREE.Vector3(), _p = new THREE.Vector3(), _m = new THREE.Matrix4();
+
+// Every spark and bullet glow in one draw call: a pool of soft points, refilled each frame.
+// (A sprite with its own material per spark made the renderer set up a new material every shot.)
+class Glow {
+  constructor(tex, cap) {
+    this.cap = cap; this.n = 0;
+    const g = new THREE.BufferGeometry(), a = (k, n) => { const at = new THREE.BufferAttribute(new Float32Array(cap * n), n); at.setUsage(THREE.DynamicDrawUsage); g.setAttribute(k, at); return at; };
+    this.pos = a('position', 3); this.col = a('color', 3); this.size = a('aSize', 1); g.setDrawRange(0, 0);
+    const m = new THREE.PointsMaterial({ map: tex, size: 1, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+    m.onBeforeCompile = (sh) => { sh.vertexShader = 'attribute float aSize;\n' + sh.vertexShader.replace('gl_PointSize = size;', 'gl_PointSize = size * aSize;'); };
+    this.points = new THREE.Points(g, m); this.points.frustumCulled = false; this.points.renderOrder = 2;
+  }
+  put(x, y, z, color, k, size) {
+    if (this.n >= this.cap) return;
+    const i = this.n++, p = this.pos.array, c = this.col.array;
+    p[i * 3] = x; p[i * 3 + 1] = y; p[i * 3 + 2] = z;
+    c[i * 3] = color.r * k; c[i * 3 + 1] = color.g * k; c[i * 3 + 2] = color.b * k; this.size.array[i] = size;
+  }
+  flush() {
+    this.points.geometry.setDrawRange(0, this.n);
+    for (const [at, w] of [[this.pos, 3], [this.col, 3], [this.size, 1]]) { at.clearUpdateRanges(); at.addUpdateRange(0, Math.max(1, this.n) * w); at.needsUpdate = true; }
+    this.n = 0;
+  }
+}
+const RED = new THREE.Color(0xff2040), CYAN = new THREE.Color(0x5ff8ff), CORE_RED = new THREE.Color(0xff3050);
 
 // ray against an axis-aligned box: distance or Infinity
 export function rayBox(o, d, b, max = Infinity) {
@@ -33,13 +58,15 @@ export class Enemies {
   constructor(scene, neon) {
     this.scene = scene; this.neon = new THREE.Color(neon); this.list = []; this.bullets = [];
     this.group = new THREE.Group(); scene.add(this.group);
-    this.bulletGeo = new THREE.SphereGeometry(0.16, 10, 8);
-    this.bulletMat = new THREE.MeshBasicMaterial({ color: 0xff3050 }); this.bulletMat2 = new THREE.MeshBasicMaterial({ color: 0x5ff8ff });
+    // every bullet's bright core in one draw call
+    this.shots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }), 400);
+    this.shots.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.shots.setColorAt(0, CORE_RED); this.shots.count = 0; this.shots.frustumCulled = false; this.group.add(this.shots);
     this.glowTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
     this.laserMat = new THREE.LineBasicMaterial({ color: 0xff2040, transparent: true, opacity: 0.8 });
-    this.sparks = [];
+    this.sparks = []; this.pool = [];
+    this.glow = new Glow(this.glowTex, 1500); this.group.add(this.glow.points);
   }
-  clear() { for (const e of this.list) this.group.remove(e.m.g); for (const b of this.bullets) this.group.remove(b.mesh); for (const s of this.sparks) this.group.remove(s.m); this.list = []; this.bullets = []; this.sparks = []; }
+  clear() { for (const e of this.list) { this.group.remove(e.m.g); this.dropLaser(e); } this.list = []; this.bullets = []; this.pool.push(...this.sparks); this.sparks = []; this.draw(); }
   spawn(def, idx) {
     const T = TYPES[def.type], m = makeModel(def.type, this.neon);
     m.g.position.set(...def.p); this.group.add(m.g);
@@ -93,25 +120,23 @@ export class Enemies {
     this.kill(e, how); return true;
   }
   kill(e, how) {
-    e.dead = true; e.dieT = 0; this.spark(this.center(e), this.neon.getHex(), 26); if (e.laser) { this.group.remove(e.laser); e.laser = null; }
+    e.dead = true; e.dieT = 0; this.spark(this.center(e), this.neon.getHex(), 26); this.dropLaser(e);
     this.onKill?.(e, how);
   }
   spark(p, color, n = 10) {
+    const col = color instanceof THREE.Color ? color : new THREE.Color(color);
     for (let i = 0; i < n; i++) {
-      const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
-      m.position.copy(p); m.scale.setScalar(0.25 + Math.random() * 0.3); this.group.add(m);
-      this.sparks.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 6, (Math.random() - 0.5) * 8), life: 0.4 + Math.random() * 0.3 });
+      const s = this.pool.pop() || { p: new THREE.Vector3(), v: new THREE.Vector3(), c: null, life: 0, size: 0 };
+      s.p.copy(p); s.v.set((Math.random() - 0.5) * 8, Math.random() * 6, (Math.random() - 0.5) * 8); s.c = col; s.life = 0.4 + Math.random() * 0.3; s.size = 0.25 + Math.random() * 0.3;
+      this.sparks.push(s);
     }
   }
 
   // ---------- their turn ----------
   fire(e, from, target, speed, spread = 0) {
     const d = target.clone().sub(from).normalize();
-    if (spread) d.add(new THREE.Vector3((Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread * 0.4, (Math.random() - 0.5) * spread)).normalize();
-    const mesh = new THREE.Mesh(this.bulletGeo, this.bulletMat);
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, color: 0xff2040, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); halo.scale.setScalar(1.1); mesh.add(halo);
-    mesh.position.copy(from); this.group.add(mesh);
-    this.bullets.push({ mesh, halo, pos: mesh.position, vel: d.multiplyScalar(speed), life: 6, from: e, deflected: false, prev: from.clone() });
+    if (spread) d.add(_d.set((Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread * 0.4, (Math.random() - 0.5) * spread)).normalize();
+    if (this.bullets.length < 400) this.bullets.push({ pos: from.clone(), vel: d.multiplyScalar(speed), life: 6, from: e, deflected: false, prev: from.clone() });
     e.kick = 1; this.onFire?.(e);
   }
   update(dt, P, boxes, focusK) {
@@ -161,7 +186,7 @@ export class Enemies {
         e.tele -= dt;
         if (e.type === 'sniper') this.laser(e, c, eye);
         if (e.tele <= 0) {
-          if (e.laser) { this.group.remove(e.laser); e.laser = null; }
+          this.dropLaser(e);
           const lead = e.T.speed < 40 ? P.vel.clone().multiplyScalar(dist / e.T.speed * 0.5) : new THREE.Vector3();
           const tgt = eye.clone().add(lead); tgt.y -= 0.25;
           if (e.type === 'shield') for (let i = 0; i < 3; i++) this.fire(e, c, tgt, e.T.speed, 0.14);
@@ -176,19 +201,32 @@ export class Enemies {
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       b.prev.copy(b.pos); b.pos.addScaledVector(b.vel, dt); b.life -= dt;
-      const spd = b.vel.length(), d = b.vel.clone().divideScalar(spd);
+      const spd = b.vel.length(), d = _d.copy(b.vel).divideScalar(spd || 1);
       let gone = b.life <= 0 || rayWorld(b.prev, d, boxes, spd * dt) < spd * dt;
       if (b.deflected) {
         for (const e of this.list) if (!e.dead && this.center(e).distanceTo(b.pos) < e.T.r + 0.5) { if (!e.shielded) this.damage(e, e.type === 'pylon' ? 6 : 3, 'deflect'); gone = true; break; }
       } else if (P.alive && segPointDist(b.prev, b.pos, P.pos, P.h) < 0.42) { this.onHit?.(b); gone = true; }
       else if (!b.whiz && P.alive && b.pos.distanceTo(eye) < 2.6) { b.whiz = true; this.onWhiz?.(b); }
-      if (gone) { this.group.remove(b.mesh); this.bullets.splice(i, 1); if (b.life > 0) { this.spark(b.pos, b.deflected ? 0x5ff8ff : 0xff2040, 5); this.onImpact?.(b.pos); } }
+      if (gone) { this.bullets[i] = this.bullets[this.bullets.length - 1]; this.bullets.pop(); if (b.life > 0) { this.spark(b.pos, b.deflected ? 0x5ff8ff : 0xff2040, 5); this.onImpact?.(b.pos); } }
     }
-    for (let i = this.sparks.length - 1; i >= 0; i--) { const s = this.sparks[i]; s.life -= dt; s.v.y -= 14 * dt; s.m.position.addScaledVector(s.v, dt); s.m.material.opacity = Math.max(0, s.life * 2); if (s.life <= 0) { this.group.remove(s.m); s.m.material.dispose(); this.sparks.splice(i, 1); } }
+    for (let i = this.sparks.length - 1; i >= 0; i--) { const s = this.sparks[i]; s.life -= dt; s.v.y -= 14 * dt; s.p.addScaledVector(s.v, dt); if (s.life <= 0) { this.pool.push(s); this.sparks[i] = this.sparks[this.sparks.length - 1]; this.sparks.pop(); } }
+    this.draw();
   }
+  // fill this frame's bullet cores and glows
+  draw() {
+    const S = this.shots, G = this.glow; let n = 0;
+    for (const b of this.bullets) {
+      _m.makeTranslation(b.pos.x, b.pos.y, b.pos.z); S.setMatrixAt(n, _m); S.setColorAt(n, b.deflected ? CYAN : CORE_RED); n++;
+      G.put(b.pos.x, b.pos.y, b.pos.z, b.deflected ? CYAN : RED, 1, 1.1);
+    }
+    S.count = n; S.instanceMatrix.needsUpdate = true; if (S.instanceColor) S.instanceColor.needsUpdate = true;
+    for (const s of this.sparks) G.put(s.p.x, s.p.y, s.p.z, s.c, Math.min(1, s.life * 2), s.size);
+    G.flush();
+  }
+  dropLaser(e) { if (e.laser) { this.group.remove(e.laser); e.laser.geometry.dispose(); e.laser = null; } }
   laser(e, from, to) {
-    if (!e.laser) { e.laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), this.laserMat); this.group.add(e.laser); }
-    else e.laser.geometry.setFromPoints([from, to]);
+    if (!e.laser) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3).setUsage(THREE.DynamicDrawUsage)); e.laser = new THREE.Line(g, this.laserMat); e.laser.frustumCulled = false; this.group.add(e.laser); }
+    const at = e.laser.geometry.attributes.position; at.setXYZ(0, from.x, from.y, from.z); at.setXYZ(1, to.x, to.y, to.z); at.needsUpdate = true;
   }
   // blade timed right: shots arriving in front of you go back where they came from
   deflect(eye, fw, reach = 3.4) {
@@ -199,7 +237,7 @@ export class Enemies {
       if (d > reach || _w.normalize().dot(fw) < 0.2) continue;
       const tgt = b.from && !b.from.dead ? this.center(b.from) : b.pos.clone().addScaledVector(fw, 30);
       b.vel = tgt.sub(b.pos).normalize().multiplyScalar(Math.max(40, b.vel.length() * 1.4));
-      b.deflected = true; b.mesh.material = this.bulletMat2; b.halo.material.color.setHex(0x5ff8ff); b.life = 3; n++;
+      b.deflected = true; b.life = 3; n++;
     }
     return n;
   }
@@ -227,7 +265,7 @@ export class Enemies {
 function segPointDist(a, b, feet, h) {
   let best = Infinity;
   for (let i = 0; i <= 4; i++) {
-    const p = new THREE.Vector3().lerpVectors(a, b, i / 4);
+    const p = _p.lerpVectors(a, b, i / 4);
     const y = THREE.MathUtils.clamp(p.y, feet.y + 0.3, feet.y + h - 0.2);
     best = Math.min(best, Math.hypot(p.x - feet.x, p.y - y, p.z - feet.z));
   }
