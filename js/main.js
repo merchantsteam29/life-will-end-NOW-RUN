@@ -18,7 +18,11 @@ const store = {
 };
 const DEF = { sens: 1, padSens: 1, touchSens: 1, fov: 95, vol: 0.8, music: 0.55, invert: false, bob: true, shake: true, autoRes: true, pads: true, rumble: true, voices: true, voiceVol: 1, surround: true };
 const settings = { ...DEF, ...store.get('settings', {}) };
-const progress = { unlocked: 1, best: {}, ...store.get('progress', {}) };
+const progress = { unlocked: 1, bests: {}, ...store.get('progress', {}) };
+// 2.0: three new chapters went in before the Spire (old 5 is now 7, the boss 6 is now 9), and every chapter got
+// about three times longer, so old best times don't count any more. What you had unlocked stays unlocked.
+if (!progress.v) { progress.unlocked = [1, 1, 2, 3, 4, 7, 9][Math.min(6, progress.unlocked || 1)]; progress.v = 2; }
+progress.bests ||= {};
 const stats = { kills: 0, blade: 0, deflects: 0, deaths: 0, chapters: 0, ...store.get('stats', {}) };
 const saveAll = () => { store.set('settings', settings); store.set('progress', progress); store.set('stats', stats); };
 
@@ -44,9 +48,9 @@ VM.blade.rotation.set(0.35, 0.3, 0.75);
 // ---------- prompts: the names of the buttons on whatever you're holding ----------
 function keyNames() {
   const I = input;
-  if (I.padMode) { const L = LABELS[I.kind] || LABELS.xbox; return { jump: L[0], slide: L[1] + ' (hold)', dash: L[5], shoot: L[7], blade: L[6], focus: L[4], restart: L[8], pause: L[9] }; }
-  if (I.touchMode) return { jump: 'JUMP', slide: 'SLIDE', dash: 'DASH', shoot: 'FIRE', blade: 'BLADE', focus: 'FOCUS', restart: 'pause > checkpoint', pause: 'II' };
-  return { jump: 'Space', slide: 'C', dash: 'Shift', shoot: 'Left click', blade: 'Right click', focus: 'Q', restart: 'R', pause: 'Esc' };
+  if (I.padMode) { const L = LABELS[I.kind] || LABELS.xbox; return { jump: L[0], slide: L[1] + ' (hold)', dash: L[5], shoot: L[7], blade: L[6], focus: L[4], hook: L[3], restart: L[8], pause: L[9] }; }
+  if (I.touchMode) return { jump: 'JUMP', slide: 'SLIDE', dash: 'DASH', shoot: 'FIRE', blade: 'BLADE', focus: 'FOCUS', hook: 'HOOK', restart: 'pause > checkpoint', pause: 'II' };
+  return { jump: 'Space', slide: 'C', dash: 'Shift', shoot: 'Left click', blade: 'Right click', focus: 'Q', hook: 'E', restart: 'R', pause: 'Esc' };
 }
 const fillKeys = (t) => { const k = keyNames(); return t.replace(/\{(\w+)\}/g, (_, n) => k[n] || n); };
 const PAD_NAMES = { xbox: 'Xbox controller', ps: 'PlayStation controller', deck: 'Steam Deck', steam: 'Steam Controller', switch: 'Switch controller' };
@@ -55,10 +59,11 @@ function refreshPrompts() {
   document.body.classList.remove('m-keys', 'm-pad', 'm-touch'); document.body.classList.add('m-' + mode2);
   const k = keyNames();
   $('focusLbl').textContent = mode2 === 'touch' ? 'FOCUS' : `FOCUS [${k.focus}]`;
+  $('hookMark').dataset.k = mode2 === 'touch' ? 'HOOK' : k.hook;
   const L = LABELS[I.kind] || LABELS.xbox;
   $('padTitle').textContent = 'CONTROLLER · ' + (PAD_NAMES[I.kind] || 'controller').toUpperCase();
   $('padMap').innerHTML = [['Left stick / D-pad', 'Move'], ['Right stick', 'Look'], [L[0], 'Jump (and wall-jump)'], [L[1] + ' / ' + L[11], 'Slide (hold)'], [L[5] + ' / ' + L[10], 'Dash'],
-    [L[7], 'Shoot'], [L[6] + ' / ' + L[2], 'Blade (and deflect)'], [L[4], 'Focus (hold)'], [L[8], 'Back to checkpoint'], [L[9], 'Pause']].map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('');
+    [L[7], 'Shoot'], [L[6] + ' / ' + L[2], 'Blade (and deflect)'], [L[3], 'Grapple (look at a ring)'], [L[4], 'Focus (hold)'], [L[8], 'Back to checkpoint'], [L[9], 'Pause']].map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('');
   const hello = I.gp ? `${PAD_NAMES[I.kind] || 'Controller'} connected · ${L[0]} to choose, ${L[1]} to go back` : 'Controller ready';
   $('padHello').textContent = hello; $('padNow').textContent = I.padMode ? hello : 'Plug in or pair a controller and press any button.';
   if (radioCur) $('radioTxt').textContent = fillKeys(radioCur.line.t).slice(0, radioCur.shown);
@@ -75,6 +80,10 @@ let mode = 'title'; // title | intro | play | dead | paused | result | ending
 let runT = 0, deaths = 0, kills = 0, cpIdx = -1, deadAtCp = new Set(), saidDone = new Set(), clock = 0;
 let ammo = 6, reloadT = 0, fireCd = 0, bladeCd = 0, deflectT = 0, focus = 1, focusOn = false, bossKilled = false, chapterDeaths = 0;
 let radioQ = [], radioT = 0, radioCur = null, hintT = 0, introT = 0, deadT = 0, flashT = 0, shake = 0, endT = 0;
+let arenaSt = []; // per lock-in arena: state 0 waiting, 1 shut (fighting), 2 cleared
+// the grapple line, from your left hand to the ring
+const rope = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3)), new THREE.LineBasicMaterial({ color: 0x9ff8ff }));
+rope.frustumCulled = false; rope.visible = false; scene.add(rope);
 
 function show(id, on) { $(id).hidden = !on; }
 function screens(id) { for (const s of ['title', 'chapters', 'how', 'settings', 'pause', 'result', 'ending']) show(s, s === id); }
@@ -98,21 +107,69 @@ function loadChapter(id) {
   enemies.onFire = (e) => sfx.enemyShot(enemies.center(e), e.type); enemies.onTele = (e) => sfx.tele(enemies.center(e), e.type, e.T.tele);
   enemies.onWhiz = (b) => sfx.whiz(b.pos); enemies.onStep = (e) => sfx.thud(e.pos);
   enemies.onImpact = (p) => { if (p.distanceTo(camera.position) < 40) sfx.impact(p); };
+  enemies.onBoom = (p) => { sfx.boom(p); const d = p.distanceTo(camera.position); if (d < 14) shake = Math.max(shake, 0.5 * (1 - d / 14)); };
+  arenaSt = L.arenas.map(() => ({ state: 0, wave: 0, wait: 0, list: [] }));
   radioQ = []; radioCur = null; radioT = 0.6; voice.cancel(); $('radio').classList.remove('on'); hintT = 0; $('hint').classList.remove('on');
   cpIdx = -1; deadAtCp = new Set(); saidDone = new Set(); runT = 0; deaths = 0; kills = 0; bossKilled = false; chapterDeaths = 0;
   spawnFromCheckpoint();
   // compile every shader now, under the title card, so the first look at things doesn't stutter
   try { renderer.compile(scene, camera); renderer.compile(vmScene, vmCam); } catch { /* fine */ }
-  $('chapLbl').textContent = `${ch.id} · ${ch.name}`;
+  $('chapLbl').textContent = `${ch.id} · ${ch.name}`; $('deaths').textContent = '';
   $('boss').hidden = !ch.boss;
 }
 function spawnFromCheckpoint() {
   enemies.clear();
   L.enemies.forEach((d, i) => { if (!deadAtCp.has(i)) enemies.spawn(d, i); });
-  const cp = cpIdx >= 0 ? L.checkpoints[cpIdx].p : [L.spawn.x, L.spawn.y, L.spawn.z];
-  player.reset(new THREE.Vector3(...cp), 0);
+  const cpD = cpIdx >= 0 ? L.checkpoints[cpIdx] : null, cp = cpD ? cpD.p : [L.spawn.x, L.spawn.y, L.spawn.z];
+  player.reset(new THREE.Vector3(...cp), cpD ? cpD.yaw || 0 : 0);
+  // an arena you hadn't cleared opens again and waits for you
+  for (const s of arenaSt) if (s.state !== 2) { s.state = 0; s.wave = 0; s.wait = 0; s.list = []; }
+  setGates(); rope.visible = false;
   ammo = 6; reloadT = 0; focus = Math.max(focus, 0.5); fireCd = 0.2; bladeCd = 0;
   if (world) for (const b of L.movers) b.delta = null;
+}
+// ---------- lock-in arenas ----------
+function setGates() {
+  const shut = [];
+  L.arenas.forEach((a, i) => { if (arenaSt[i] && arenaSt[i].state === 1) shut.push(...a.gates); });
+  boxes = shut.length ? L.boxes.concat(shut) : L.boxes;
+  if (world) world.setGates(shut);
+  if (!shut.length) $('wave').classList.remove('on');
+}
+function spawnWave(i) {
+  const a = L.arenas[i], s = arenaSt[i];
+  s.list = a.waves[s.wave].map((d, k) => {
+    const e = enemies.spawn(d, 100000 + i * 1000 + s.wave * 50 + k); e.aware = true; e.cd = 0.9 + Math.random() * 0.8;
+    enemies.spark(enemies.center(e), ch.neon, 22); return e;
+  });
+  sfx.lock(s.wave > 0);
+}
+function updateArenas(dt) {
+  const p = player.pos;
+  L.arenas.forEach((a, i) => {
+    const s = arenaSt[i], z = a.zone;
+    if (s.state === 0) {
+      if (p.x > z.min[0] && p.x < z.max[0] && p.z > z.min[2] && p.z < z.max[2] && p.y > z.min[1] && p.y < z.max[1]) {
+        s.state = 1; s.wave = 0; spawnWave(i); setGates(); shake = Math.max(shake, 0.3);
+        hint('LOCKDOWN · CLEAR EVERY WAVE', 2.2);
+      }
+      return;
+    }
+    if (s.state !== 1) return;
+    const left = s.list.filter((e) => !e.dead).length;
+    if (!left) {
+      s.wait += dt;
+      if (s.wait > 1.1) {
+        s.wait = 0;
+        if (s.wave + 1 < a.waves.length) { s.wave++; spawnWave(i); hint(`WAVE ${s.wave + 1}`, 1.4); }
+        else { s.state = 2; setGates(); sfx.checkpoint(); hint('CLEAR · THE WAY IS OPEN', 2); focus = Math.min(1, focus + 0.3); }
+      }
+    }
+    if (s.state === 1) {
+      const t = `${a.name || 'LOCKDOWN'} · WAVE ${s.wave + 1}/${a.waves.length} · ${left} LEFT`;
+      setOnce('wave', t, (v) => { $('wave').textContent = v; $('wave').classList.add('on'); });
+    }
+  });
 }
 function startChapter(id) {
   initAudio(); loadChapter(id);
@@ -131,7 +188,9 @@ function onKill(e, how) {
   $('cross').classList.add('hit'); setTimeout(() => $('cross').classList.remove('hit'), 120);
   shake = Math.max(shake, 0.25);
   if (e.type === 'core') { bossKilled = true; sfx.bossHit(enemies.center(e)); }
-  if (e.type === 'pylon') { sfx.bossHit(enemies.center(e)); const left = enemies.list.filter((o) => o.type === 'pylon' && !o.dead).length; hint(left ? `PYLON DOWN · ${left} LEFT` : 'THE CORE IS OPEN · CUT IT', 2.5); if (!left) queue([{ who: 'WREN', t: 'Its shield is down! Get up there and cut it!' }]); }
+  if (e.type === 'pylon') { sfx.bossHit(enemies.center(e)); const left = enemies.list.filter((o) => o.type === 'pylon' && !o.dead).length; hint(left ? `PYLON DOWN · ${left} LEFT` : 'THE CORE IS OPEN · CUT IT', 2.5);
+    // every pylon that falls calls down two seekers
+    for (let i = 0; i < 2; i++) { const s = enemies.spawn({ type: 'seeker', p: [e.home.x + (i ? 2 : -2), e.home.y + 5, e.home.z] }, 2000000 + Math.floor(Math.random() * 1e6)); s.aware = true; } if (!left) queue([{ who: 'WREN', t: 'Its shield is down! Get up there and cut it!' }]); }
   saveAll();
 }
 function die(why) {
@@ -148,10 +207,10 @@ function finishChapter() {
   sfx.clear();
   const par = ch.par, t = runT;
   const rank = t <= par * 0.85 && deaths === 0 ? 'S' : t <= par && deaths <= 2 ? 'A' : t <= par * 1.5 && deaths <= 6 ? 'B' : 'C';
-  const prev = progress.best[ch.id], order = 'SABC';
+  const prev = progress.bests[ch.id], order = 'SABC';
   const better = !prev || order.indexOf(rank) < order.indexOf(prev.rank) || (rank === prev.rank && t < prev.time);
-  if (better) progress.best[ch.id] = { rank, time: t, deaths };
-  if (prev && t < prev.time) progress.best[ch.id].time = t;
+  if (better) progress.bests[ch.id] = { rank, time: t, deaths };
+  if (prev && t < prev.time) progress.bests[ch.id].time = t;
   progress.unlocked = Math.max(progress.unlocked, Math.min(CHAPTERS.length, ch.id + 1));
   stats.chapters++;
   if (deaths === 0) stats.flawless = (stats.flawless || 0) + 1;
@@ -161,7 +220,7 @@ function finishChapter() {
   show('hud', false); screens('result');
   $('resTitle').textContent = `${ch.name} · CLEAR`;
   $('resRank').textContent = rank;
-  const best = progress.best[ch.id];
+  const best = progress.bests[ch.id];
   $('resStats').innerHTML = `<dt>Time</dt><dd>${fmt(t)}</dd><dt>Par</dt><dd>${fmt(par)}</dd><dt>Deaths</dt><dd>${deaths}</dd><dt>Kills</dt><dd>${kills}</dd><dt>Best</dt><dd>${best.rank} · ${fmt(best.time)}</dd>`;
   $('btnNext').hidden = ch.id >= CHAPTERS.length;
   $('btnNext').focus();
@@ -217,7 +276,8 @@ function updatePlay(dt, rawDt) {
   player.update(meDt, I, L, boxes, settings);
   for (const e of player.events) {
     if (e === 'jump') sfx.jump(); else if (e === 'airjump') sfx.airjump(); else if (e === 'dash') sfx.dash(); else if (e === 'land') sfx.land();
-    else if (e === 'wallrun') { sfx.wallrun(); input.rumble(0, 0.2, 80); } else if (e === 'walljump') sfx.jump(); else if (e === 'pad') { sfx.pad(); input.rumble(0.5, 0.3, 140); } else if (e === 'slide') sfx.dash(); else if (e === 'fell') die('fell');
+    else if (e === 'wallrun') { sfx.wallrun(); input.rumble(0, 0.2, 80); } else if (e === 'walljump') sfx.jump();
+    else if (e === 'hook') { sfx.hook(); input.rumble(0.3, 0.5, 120); } else if (e === 'zip') { sfx.zip(); input.rumble(0.2, 0.4, 100); } else if (e === 'pad') { sfx.pad(); input.rumble(0.5, 0.3, 140); } else if (e === 'slide') sfx.dash(); else if (e === 'fell') die('fell');
   }
   player.events.length = 0;
   if (mode !== 'play') return;
@@ -263,8 +323,13 @@ function updatePlay(dt, rawDt) {
       if (world.cps[i]) world.cps[i].material.color.setHex(ch.accent);
     }
   });
-  // story lines as you pass
-  L.says.forEach((s, i) => { if (!saidDone.has(i) && player.pos.z < s.z) { saidDone.add(i); queue(s.lines); } });
+  // story lines as you pass (each one faces along the route where it was placed)
+  L.says.forEach((s, i) => {
+    if (saidDone.has(i)) return;
+    const dx = player.pos.x - s.p[0], dz = player.pos.z - s.p[2];
+    if (dx * s.f[0] + dz * s.f[1] > 0 && Math.hypot(dx, dz) < 22 && Math.abs(player.pos.y - s.p[1]) < 14) { saidDone.add(i); queue(s.lines); }
+  });
+  updateArenas(rawDt);
   // the exit, or the boss
   if (L.exit && Math.hypot(player.pos.x - L.exit.p[0], player.pos.z - L.exit.p[2]) < 2.4 && Math.abs(player.pos.y - L.exit.p[1]) < 3) finishChapter();
   if (ch.boss) {
@@ -281,6 +346,18 @@ function updatePlay(dt, rawDt) {
 const hudLast = {};
 const setOnce = (k, v, fn) => { if (hudLast[k] !== v) { hudLast[k] = v; fn(v); } };
 function updateHud() {
+  // the grapple: a marker on the ring you'd hook, and the line while it pulls
+  const ht = mode === 'play' && player.hookTarget;
+  if (world && world.setHook) setOnce('hk', ht, (h) => world.setHook(h || null));
+  const mk = $('hookMark');
+  if (ht) {
+    const v = ht.v.clone().project(camera);
+    if (v.z < 1) { mk.style.transform = `translate(${((v.x + 1) / 2 * innerWidth).toFixed(0)}px, ${((1 - v.y) / 2 * innerHeight).toFixed(0)}px)`; mk.classList.add('on'); } else mk.classList.remove('on');
+  } else mk.classList.remove('on');
+  if (player.grap) {
+    const at = rope.geometry.attributes.position, c = camera.position, r = _fw.set(-0.32, -0.3, -0.5).applyQuaternion(camera.quaternion);
+    at.setXYZ(0, c.x + r.x, c.y + r.y, c.z + r.z); at.setXYZ(1, player.grap.p.x, player.grap.p.y, player.grap.p.z); at.needsUpdate = true; rope.visible = true;
+  } else rope.visible = false;
   setOnce('t', fmt(runT), (v) => { $('timer').textContent = v; });
   setOnce('a', ammo + '|' + (reloadT > 0), () => { $('ammo').innerHTML = (reloadT > 0 ? '<span>RELOADING</span>' : '') + Array.from({ length: 6 }, (_, i) => `<i class="${i < ammo ? '' : 'off'}"></i>`).join(''); });
   setOnce('f', (focus * 100).toFixed(0), (v) => { $('focusBar').style.width = v + '%'; });
@@ -364,7 +441,7 @@ function refreshTitle() {
 }
 function chapterList() {
   $('chapList').innerHTML = CHAPTERS.map((c) => {
-    const lock = c.id > progress.unlocked, b = progress.best[c.id];
+    const lock = c.id > progress.unlocked, b = progress.bests[c.id];
     return `<button class="chapter" data-ch="${c.id}" ${lock ? 'disabled' : ''}><span class="n">${c.id}</span><span><b>${lock ? '???' : c.name}</b><small>${lock ? 'Locked' : c.sub}</small></span><span class="rk">${b ? b.rank : ''}<small>${b ? fmt(b.time) : ''}</small></span></button>`;
   }).join('');
 }
@@ -418,12 +495,14 @@ function menuNav(dt) {
 // ---------- sync + achievements (sync.js) ----------
 if (window.GameSync) {
   const st = (g) => g('lwe.stats') || {}, pr = (g) => g('lwe.progress') || {};
-  const cleared = (g, n) => !!(pr(g).best || {})[n];
+  const cleared = (g, n) => !!(pr(g).bests || {})[n];
   GameSync.init({ game: 'lifewillend', idle: () => mode === 'title', keys: [{ match: 'lwe.progress', mode: 'max' }, { match: 'lwe.stats', mode: 'max' }], ach: [
     { id: 'ch1', name: 'Last delivery', desc: 'Finish chapter 1', test: (g) => cleared(g, 1) },
     { id: 'ch3', name: 'Under the Ring', desc: 'Finish the Floodworks', test: (g) => cleared(g, 3) },
-    { id: 'ch5', name: 'Don\'t look down', desc: 'Climb the Spire', test: (g) => cleared(g, 5) },
-    { id: 'end', name: 'Life did not end', desc: 'Stop HALCYON', test: (g) => cleared(g, 6) },
+    { id: 'ch5', name: 'Don\'t look down', desc: 'Climb the Spire', test: (g) => cleared(g, 7) },
+    { id: 'ch6', name: 'Glass ceiling', desc: 'Cross the Glasshouse', test: (g) => cleared(g, 6) },
+    { id: 'ch8', name: 'Sing it back', desc: 'Get through the Choir', test: (g) => cleared(g, 8) },
+    { id: 'end', name: 'Life did not end', desc: 'Stop HALCYON', test: (g) => cleared(g, 9) || ((pr(g).v || 0) < 2 && !!(pr(g).best || {})[6]) },
     { id: 'flawless', name: 'Untouched', desc: 'Finish a chapter without dying', test: (g) => (st(g).flawless || 0) > 0 },
     { id: 'srank', name: 'Courier of the year', desc: 'Get an S rank', test: (g) => (st(g).sranks || 0) > 0 },
     { id: 'deflect10', name: 'Return to sender', desc: 'Kill 10 wardens with their own shots', test: (g) => (st(g).deflects || 0) >= 10 },
@@ -441,7 +520,7 @@ requestAnimationFrame(frame);
 // test hook (only with ?test)
 if (TEST) window.__lw = {
   get mode() { return mode; }, get player() { return player; }, get enemies() { return enemies; }, get L() { return L; }, get ch() { return ch; },
-  get ammo() { return ammo; }, get radio() { return radioCur; }, voice, queue, get deaths() { return deaths; }, get cp() { return cpIdx; }, get runT() { return runT; }, input, CHAPTERS, buildChapter,
+  get ammo() { return ammo; }, get arenas() { return arenaSt; }, get boxes() { return boxes; }, get radio() { return radioCur; }, voice, queue, get deaths() { return deaths; }, get cp() { return cpIdx; }, get runT() { return runT; }, input, CHAPTERS, buildChapter,
   start: startChapter, finish: finishChapter, die, progress, stats, settings, pause, Player, THREE, refreshPrompts, fillKeys,
   tp(x, y, z) { player.pos.set(x, y, z); player.vel.set(0, 0, 0); },
 };

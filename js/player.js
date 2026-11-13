@@ -2,10 +2,16 @@
 // Collision is box against box (the level is all boxes), one axis at a time, with small steps climbed.
 import * as THREE from 'three';
 import { KIND } from './levels.js';
+import { rayWorld } from './enemies.js';
 
 const R = 0.34, H_STAND = 1.8, H_SLIDE = 0.95;
 const RUN = 10.5, ACC_G = 70, ACC_A = 22, FRICTION = 12, GRAV = 28, JUMP = 11, PAD = 22, TERMINAL = 40;
 const DASH = 26, DASH_T = 0.16, WALL_T = 1.9;
+// the grapple: how far it reaches, how wide the aim cone is, how hard it pulls, what you leave with
+const HOOK_RANGE = 34, HOOK_CONE = 0.3, HOOK_CONE_PAD = 0.45, PULL = 30, PULL_ACC = 45, HOOK_OUT_H = 17, HOOK_OUT_Y = 6.5;
+// ziplines: how fast you ride, how close your hands must pass
+const ZIP_MIN = 16, ZIP_MAX = 24, ZIP_REACH = 1.0, HANG = 2.3;
+const _a = new THREE.Vector3(), _b = new THREE.Vector3();
 
 export class Player {
   constructor(camera) {
@@ -20,6 +26,7 @@ export class Player {
     this.dashT = 0; this.dashDir = new THREE.Vector3(); this.dashReady = true; this.dashCd = 0;
     this.wall = null; this.wallCd = 0; this.lastWall = null; this.slideT = 0; this.sliding = false;
     this.landDip = 0; this.bob = 0; this.fovKick = 0; this.alive = true; this.padT = 0;
+    this.grap = null; this.hookTarget = null; this.hookCd = 0; this.zip = null; this.zipCd = 0; this.lastZip = null; this.lastGroundY = p.y;
     this.events = [];
   }
   get eye() { return new THREE.Vector3(this.pos.x, this.pos.y + this.h - 0.12, this.pos.z); }
@@ -67,8 +74,21 @@ export class Player {
     const fw = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)), rt = new THREE.Vector3(-fw.z, 0, fw.x);
     const wish = fw.clone().multiplyScalar(mz).addScaledVector(rt, mx); if (wish.lengthSq() > 1) wish.normalize();
     const jumpHit = I.hit('Space') || (P && P.jump), slideHeld = I.down('KeyC', 'ControlLeft', 'ShiftRight') || (P && P.slide), dashHit = I.hit('ShiftLeft') || (P && P.dash);
+    const hookHit = I.hit('KeyE', 'KeyF') || I.mmbHit || (P && P.hook);
     if (jumpHit) this.jumpBuf = 0.13;
-    this.jumpBuf -= dt; this.coyote -= dt; this.wallCd -= dt; this.dashCd -= dt; this.padT -= dt;
+    this.jumpBuf -= dt; this.coyote -= dt; this.wallCd -= dt; this.dashCd -= dt; this.padT -= dt; this.hookCd -= dt; this.zipCd -= dt;
+
+    // riding a zipline: nothing else moves you until you let go
+    if (this.zip) { this.rideZip(dt, slideHeld); this.camera(dt, I, settings); return; }
+
+    // the grapple: the ring you're looking at, and hooking on to it
+    this.hookTarget = this.grap ? null : this.findHook(L.hooks, boxes, I.padMode || I.touchMode);
+    if (hookHit && this.hookTarget && this.hookCd <= 0) {
+      const h = this.hookTarget;
+      this.grap = { p: h.v || (h.v = new THREE.Vector3(...h.p)), t: 0, sp: Math.max(16, this.vel.length()) };
+      this.wall = null; this.dashT = 0; this.sliding = false; this.grounded = false; this.hookCd = 0.3; this.fovKick = 0.6; this.jumpBuf = 0; ev.push('hook');
+    }
+    if (this.grap) { this.pull(dt, boxes, jumpHit); this.camera(dt, I, settings); return; }
 
     // dash: a straight burst where you're looking (along the ground plane), once in the air
     if (dashHit && this.dashT <= 0 && this.dashCd <= 0 && (this.grounded || this.dashReady)) {
@@ -143,9 +163,84 @@ export class Player {
 
     // wall-run: in the air, moving, beside a runnable wall
     if (!this.grounded && !this.wall && this.dashT <= 0) this.tryWall(boxes, wish, fw);
+    // a zipline within reach of your hands: grab it
+    if (!this.grounded && L.zips && L.zips.length) this.tryZip(L.zips);
 
-    if (this.pos.y < L.killY) { this.alive = false; ev.push('fell'); }
+    if (this.grounded) this.lastGroundY = this.pos.y;
+    if (this.pos.y < L.killY || this.overVoid(boxes)) { this.alive = false; ev.push('fell'); }
     this.camera(dt, I, settings);
+  }
+
+  // falling well below where you last stood, with nothing at all underneath: that's the water
+  overVoid(boxes) {
+    const p = this.pos;
+    if (this.grounded || this.vel.y >= 0 || p.y > this.lastGroundY - 14) return false;
+    return !boxes.some((b) => p.x > b.min[0] - R && p.x < b.max[0] + R && p.z > b.min[2] - R && p.z < b.max[2] + R && b.max[1] <= p.y + 0.3);
+  }
+
+  // ---------- the grapple ----------
+  findHook(hooks, boxes, wide) {
+    if (!hooks || !hooks.length) return null;
+    const eye = this.eye, fw = this.forward; let best = null, bs = wide ? HOOK_CONE_PAD : HOOK_CONE;
+    for (const h of hooks) {
+      const v = h.v || (h.v = new THREE.Vector3(...h.p));
+      _a.subVectors(v, eye); const d = _a.length();
+      if (d > HOOK_RANGE || d < 3) continue;
+      _a.divideScalar(d);
+      const ang = Math.acos(Math.min(1, _a.dot(fw)));
+      if (ang > bs) continue;
+      if (rayWorld(eye, _a, boxes, d) < d - 0.6) continue;
+      best = h; bs = ang;
+    }
+    return best;
+  }
+  pull(dt, boxes, jumpHit) {
+    const g = this.grap, ev = this.events; g.t += dt;
+    // aim your hands (a metre over your head) at the ring
+    _a.copy(g.p); _a.y -= 1.0; _a.sub(this.pos); const d = _a.length();
+    g.sp = Math.min(PULL, g.sp + PULL_ACC * dt);
+    this.vel.copy(_a).divideScalar(d || 1).multiplyScalar(g.sp);
+    const hx = this.move(boxes, 0, this.vel.x * dt), hz = this.move(boxes, 2, this.vel.z * dt), hy = this.move(boxes, 1, this.vel.y * dt);
+    // let go: at the ring, after a while, on a (fresh) jump, or when something's in the way
+    jumpHit = jumpHit && g.t > 0.1; // the jump you pressed as you hooked doesn't count
+    if (d < 2.4 || g.t > 1.4 || jumpHit || hx || hz || hy) {
+      const hv = Math.hypot(this.vel.x, this.vel.z), k = hv > HOOK_OUT_H ? HOOK_OUT_H / hv : 1;
+      this.vel.x *= k; this.vel.z *= k; this.vel.y = Math.max(0, this.vel.y) * 0.35 + HOOK_OUT_Y + (jumpHit ? 3 : 0);
+      if (hy && this.vel.y < 0) this.vel.y = 0;
+      this.grap = null; this.jumpBuf = 0; this.airJumps = 1; this.dashReady = true; this.hookCd = 0.25; ev.push('hookoff');
+    }
+  }
+
+  // ---------- ziplines ----------
+  tryZip(zips) {
+    if (this.zipCd > 0) return;
+    const hand = _b.set(this.pos.x, this.pos.y + HANG, this.pos.z);
+    for (const z of zips) {
+      if (!z.A) { z.A = new THREE.Vector3(...z.a); z.B = new THREE.Vector3(...z.b); z.len = z.A.distanceTo(z.B); z.D = z.B.clone().sub(z.A).divideScalar(z.len); }
+      const s = THREE.MathUtils.clamp(_a.subVectors(hand, z.A).dot(z.D) / z.len, 0, 1);
+      if (s > 0.94) continue;
+      _a.copy(z.A).addScaledVector(z.D, s * z.len);
+      if (_a.distanceTo(hand) > ZIP_REACH) continue;
+      const along = this.vel.dot(z.D);
+      this.zip = { z, s, sp: THREE.MathUtils.clamp(along, ZIP_MIN, ZIP_MAX) };
+      this.wall = null; this.dashT = 0; this.airJumps = 1; this.dashReady = true; this.events.push('zip');
+      return;
+    }
+  }
+  rideZip(dt, slideHeld) {
+    const r = this.zip, z = r.z;
+    r.sp = Math.min(ZIP_MAX, r.sp + 4 * dt);
+    r.s += r.sp * dt / z.len;
+    const s = Math.min(1, r.s);
+    this.pos.copy(z.A).addScaledVector(z.D, s * z.len); this.pos.y -= HANG;
+    this.vel.copy(z.D).multiplyScalar(r.sp);
+    this.h = H_STAND; this.sliding = false;
+    if (r.s >= 1 || this.jumpBuf > 0 || slideHeld) {
+      if (this.jumpBuf > 0) { this.vel.y = Math.max(this.vel.y, 0) + JUMP * 0.95; this.events.push('jump'); }
+      else if (r.s >= 1) { this.vel.x *= 0.6; this.vel.z *= 0.6; } // the clamp at the end brakes you
+      this.zip = null; this.zipCd = 0.4; this.jumpBuf = 0; this.airJumps = 1; this.dashReady = true; this.lastGroundY = Math.max(this.lastGroundY, this.pos.y);
+      this.events.push('zipoff');
+    }
   }
 
   canStand(boxes) { const h0 = this.h; this.h = H_STAND; const ok = !boxes.some((b) => this.overlap(b)); this.h = h0; return ok; }

@@ -7,7 +7,7 @@
 // ignored (their axes rest off-centre and used to spin the camera), and an axis only counts once seen centred.
 //
 // Whatever the device, the game reads one `pad` object: mx/mz (move), jump, slide, dash, fire, blade,
-// focus, pause, restart, and the menu buttons. `kind` says which button names to show.
+// focus, hook, pause, restart, and the menu buttons. `kind` says which button names to show.
 const BAD_PAD = /wheel|flight|pedal|tablet|throttle|rudder|hotas|g29|g920|g923|t300|t150|wacom|yoke|racing/i;
 const VENDOR = (id) => { const m = /vendor:\s*([0-9a-f]{4})/i.exec(id) || /^([0-9a-f]{4})-/i.exec(id); return m ? m[1].toLowerCase() : ''; };
 export function padKind(id) {
@@ -76,7 +76,7 @@ export class Input {
     addEventListener('blur', () => { this.keys.clear(); this.lmb = this.rmb = false; this.touch.held = {}; });
     addEventListener('mousemove', (e) => { if (this.locked) { this.dx += e.movementX; this.dy += e.movementY; this.setMode('keys'); } });
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) { this.lmb = true; this.lmbHit = true; } if (e.button === 2) { this.rmb = true; this.rmbHit = true; }
+      if (e.button === 0) { this.lmb = true; this.lmbHit = true; } if (e.button === 2) { this.rmb = true; this.rmbHit = true; } if (e.button === 1) { e.preventDefault(); this.mmbHit = true; }
     });
     addEventListener('mouseup', (e) => { if (e.button === 0) this.lmb = false; if (e.button === 2) this.rmb = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -126,7 +126,7 @@ export class Input {
         const ax = (i) => { const v = st.c[i] ? n.a[i] : 0; return Math.abs(v) < 0.15 ? 0 : (v - Math.sign(v) * 0.15) / 0.85; };
         const btn = (i) => !!(n.b[i] && n.b[i].p), hit = (i) => btn(i) && !prev[i];
         this.pad = { mx: ax(0) + (btn(15) ? 1 : 0) - (btn(14) ? 1 : 0), mz: -ax(1) + (btn(12) ? 1 : 0) - (btn(13) ? 1 : 0), lx: ax(2), ly: ax(3),
-          jump: hit(0), jumpHeld: btn(0), slide: btn(1) || btn(11), dash: hit(5) || hit(10), fire: btn(7), fireHit: hit(7), blade: btn(6), bladeHit: hit(6) || hit(2), focus: btn(4),
+          jump: hit(0), jumpHeld: btn(0), slide: btn(1) || btn(11), dash: hit(5) || hit(10), fire: btn(7), fireHit: hit(7), blade: btn(6), bladeHit: hit(6) || hit(2), focus: btn(4), hook: hit(3),
           pause: hit(9), restart: hit(8), up: hit(12), downB: hit(13), a: hit(0), b: hit(1) };
         const k = 380 * this.padSens * dt;
         this.dx += Math.sign(this.pad.lx) * this.pad.lx * this.pad.lx * k * 6; this.dy += Math.sign(this.pad.ly) * this.pad.ly * this.pad.ly * k * 4;
@@ -137,7 +137,7 @@ export class Input {
     if (this.touchMode) {
       const T = this.touch, s = T.stick, held = T.held, hit = T.hit;
       this.pad = { mx: s ? s.x : 0, mz: s ? -s.y : 0, lx: 0, ly: 0, jump: !!hit.jump, jumpHeld: !!held.jump, slide: !!held.slide, dash: !!hit.dash, fire: !!held.fire, fireHit: !!hit.fire,
-        blade: !!held.blade, bladeHit: !!hit.blade, focus: !!held.focus, pause: !!hit.pause, restart: false, up: false, downB: false, a: false, b: false, touch: true };
+        blade: !!held.blade, bladeHit: !!hit.blade, focus: !!held.focus, hook: !!hit.hook, pause: !!hit.pause, restart: false, up: false, downB: false, a: false, b: false, touch: true };
       T.hit = {};
     }
   }
@@ -185,5 +185,5 @@ export class Input {
       b.addEventListener('touchmove', (e) => { const t = e.changedTouches[0]; if (last) { this.dx += (t.clientX - last.x) * 2.2 * this.touchSens; this.dy += (t.clientY - last.y) * 2.2 * this.touchSens; last = { x: t.clientX, y: t.clientY }; } }, { passive: true });
     });
   }
-  endFrame() { this.pressed.clear(); this.dx = 0; this.dy = 0; this.lmbHit = false; this.rmbHit = false; }
+  endFrame() { this.pressed.clear(); this.dx = 0; this.dy = 0; this.lmbHit = false; this.rmbHit = false; this.mmbHit = false; }
 }

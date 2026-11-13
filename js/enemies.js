@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { makeModel } from './models.js';
 
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _d = new THREE.Vector3(), _p = new THREE.Vector3(), _m = new THREE.Matrix4();
+const _up = new THREE.Vector3(0, 1, 0);
 
 // Every spark and bullet glow in one draw call: a pool of soft points, refilled each frame.
 // (A sprite with its own material per spark made the renderer set up a new material every shot.)
@@ -28,7 +29,7 @@ class Glow {
     this.n = 0;
   }
 }
-const RED = new THREE.Color(0xff2040), CYAN = new THREE.Color(0x5ff8ff), CORE_RED = new THREE.Color(0xff3050);
+const RED = new THREE.Color(0xff2040), CYAN = new THREE.Color(0x5ff8ff), CORE_RED = new THREE.Color(0xff3050), SHELL = new THREE.Color(0xff8a30);
 
 // ray against an axis-aligned box: distance or Infinity
 export function rayBox(o, d, b, max = Infinity) {
@@ -43,11 +44,15 @@ export function rayBox(o, d, b, max = Infinity) {
 }
 export function rayWorld(o, d, boxes, max) { let best = max; for (const b of boxes) { const t = rayBox(o, d, b, best); if (t < best) best = t; } return best; }
 
+// walk: 'strafe' steps side to side while it shoots, 'close' walks at you until it's near
 const TYPES = {
-  gunner: { hp: 1, r: 0.55, h: 1.9, cd: [1.4, 2.0], tele: 0.5, speed: 24, range: 55, score: 100 },
-  drone: { hp: 1, r: 0.6, h: 0.9, cd: [2.0, 2.6], tele: 0.45, speed: 22, range: 50, fly: true, score: 120 },
-  sniper: { hp: 1, r: 0.55, h: 2.0, cd: [3.0, 3.6], tele: 1.1, speed: 75, range: 120, score: 150 },
-  shield: { hp: 1, r: 0.7, h: 2.0, cd: [1.8, 2.3], tele: 0.55, speed: 20, range: 30, shield: true, score: 150 },
+  gunner: { hp: 1, r: 0.55, h: 1.9, cd: [1.1, 1.6], tele: 0.45, speed: 27, range: 55, walk: 'strafe', pace: 2.6, score: 100 },
+  drone: { hp: 1, r: 0.6, h: 0.9, cd: [1.7, 2.2], tele: 0.45, speed: 24, range: 50, fly: true, score: 120 },
+  sniper: { hp: 1, r: 0.55, h: 2.0, cd: [2.8, 3.4], tele: 0.95, speed: 80, range: 120, score: 150 },
+  shield: { hp: 1, r: 0.7, h: 2.0, cd: [1.6, 2.1], tele: 0.55, speed: 21, range: 32, shield: true, walk: 'close', pace: 1.8, score: 150 },
+  heavy: { hp: 3, r: 0.8, h: 2.2, cd: [1.9, 2.5], tele: 0.65, speed: 21, range: 45, walk: 'close', pace: 2.2, score: 250 },
+  seeker: { hp: 1, r: 0.5, h: 0.6, cd: [0, 0], tele: 0, speed: 0, range: 42, fly: true, seek: true, score: 90 },
+  mortar: { hp: 1, r: 0.75, h: 1.5, cd: [2.6, 3.3], tele: 0.6, speed: 0, range: 65, lob: true, score: 160 },
   charger: { hp: 1, r: 0.6, h: 1.6, cd: [0, 0], tele: 0, speed: 0, range: 35, melee: true, score: 120 },
   turret: { hp: 3, r: 0.8, h: 1.6, cd: [0.32, 0.32], tele: 0, speed: 26, range: 45, score: 200 },
   pylon: { hp: 6, r: 1.0, h: 3.2, cd: [1.6, 2.2], tele: 0.4, speed: 18, range: 70, score: 250 },
@@ -65,8 +70,36 @@ export class Enemies {
     this.laserMat = new THREE.LineBasicMaterial({ color: 0xff2040, transparent: true, opacity: 0.8 });
     this.sparks = []; this.pool = [];
     this.glow = new Glow(this.glowTex, 1500); this.group.add(this.glow.points);
+    // where mortar shells will land: red rings on the ground
+    this.ringGeo = new THREE.RingGeometry(2.2, 2.7, 40).rotateX(-Math.PI / 2);
+    this.ringMat = new THREE.MeshBasicMaterial({ color: 0xff2040, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, blending: THREE.AdditiveBlending });
+    this.rings = [];
   }
-  clear() { for (const e of this.list) { this.group.remove(e.m.g); this.dropLaser(e); } this.list = []; this.bullets = []; this.pool.push(...this.sparks); this.sparks = []; this.draw(); }
+  clear() {
+    for (const e of this.list) { this.group.remove(e.m.g); this.dropLaser(e); }
+    for (const b of this.bullets) this.dropRing(b);
+    this.list = []; this.bullets = []; this.pool.push(...this.sparks); this.sparks = []; this.draw();
+  }
+  dropRing(b) { if (b.ring) { b.ring.visible = false; this.rings.push(b.ring); b.ring = null; } }
+  ring(p) {
+    const m = this.rings.pop() || (() => { const r = new THREE.Mesh(this.ringGeo, this.ringMat); r.renderOrder = 3; this.group.add(r); return r; })();
+    m.visible = true; m.position.set(p.x, p.y + 0.06, p.z); m.scale.setScalar(1); return m;
+  }
+  // a body can stand at (x, z): a floor top right under its feet and nothing solid in the way
+  canStand(boxes, x, y, z, r = 0.4) {
+    let floor = false;
+    for (const b of boxes) {
+      if (x > b.min[0] + r && x < b.max[0] - r && z > b.min[2] + r && z < b.max[2] - r && Math.abs(b.max[1] - y) < 0.4) floor = true;
+      if (x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2] && b.min[1] < y + 1.6 && b.max[1] > y + 0.4) return false;
+    }
+    return floor;
+  }
+  // an explosion: hurts you and any warden caught in it
+  boom(p, r, P, from) {
+    this.spark(p, 0xff7030, 34); this.spark(p, 0xffd23a, 16); this.onBoom?.(p);
+    if (P && P.alive && Math.hypot(P.pos.x - p.x, P.pos.y + 0.9 - p.y, P.pos.z - p.z) < r + 0.4) this.onHit?.({ pos: p, boom: true });
+    for (const e of this.list) if (!e.dead && e !== from && !e.shielded && e.type !== 'core' && e.type !== 'pylon' && this.center(e).distanceTo(p) < r + e.T.r) this.damage(e, 3, 'boom');
+  }
   spawn(def, idx) {
     const T = TYPES[def.type], m = makeModel(def.type, this.neon);
     m.g.position.set(...def.p); this.group.add(m.g);
@@ -110,7 +143,7 @@ export class Enemies {
       if (e.shielded) { this.spark(c, 0xff2f6d); continue; }
       hits.push(e);
     }
-    for (const e of hits) this.damage(e, e.type === 'pylon' ? 6 : e.type === 'turret' ? 3 : 1, 'blade');
+    for (const e of hits) this.damage(e, e.type === 'pylon' ? 6 : e.type === 'turret' || e.type === 'heavy' ? 3 : 1, 'blade');
     return hits;
   }
   damage(e, n, how) {
@@ -139,6 +172,18 @@ export class Enemies {
     if (this.bullets.length < 400) this.bullets.push({ pos: from.clone(), vel: d.multiplyScalar(speed), life: 6, from: e, deflected: false, prev: from.clone() });
     e.kick = 1; this.onFire?.(e);
   }
+  // a mortar shell: lobbed to land where you are (a little ahead if you are running), a red ring marks the spot
+  lob(e, from, P, boxes) {
+    const tgt = P.pos.clone().addScaledVector(_d.set(P.vel.x, 0, P.vel.z), 0.35);
+    // the ring sits on the first floor under that point
+    let gy = P.pos.y;
+    if (!P.grounded) { let best = -Infinity; for (const b of boxes) if (tgt.x > b.min[0] && tgt.x < b.max[0] && tgt.z > b.min[2] && tgt.z < b.max[2] && b.max[1] <= P.pos.y + 0.3 && b.max[1] > best) best = b.max[1]; if (best > -Infinity) gy = best; }
+    tgt.y = gy + 0.3;
+    const flat = Math.hypot(tgt.x - from.x, tgt.z - from.z), tf = THREE.MathUtils.clamp(0.9 + flat / 30, 1.1, 1.9), G = 16;
+    const v = tgt.clone().sub(from).divideScalar(tf); v.y += 0.5 * G * tf;
+    if (this.bullets.length < 400) this.bullets.push({ pos: from.clone(), vel: v, life: 6, from: e, deflected: false, prev: from.clone(), g: G, shell: true, ring: this.ring(_w.set(tgt.x, gy, tgt.z)) });
+    e.kick = 1; this.onFire?.(e);
+  }
   update(dt, P, boxes, focusK) {
     const eye = P.eye, pp = P.pos;
     for (const e of this.list) {
@@ -159,8 +204,36 @@ export class Enemies {
       if (!e.aware) { if (e.T.fly) e.pos.y = e.home.y + Math.sin(e.t * 1.6) * 0.3; continue; }
       // face you
       const want = Math.atan2(-dir.x, -dir.z); let dy = want - e.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      e.yaw += dy * Math.min(1, dt * (e.type === 'turret' ? 3 : 8));
+      e.yaw += dy * Math.min(1, dt * (e.type === 'turret' || e.type === 'mortar' ? 3 : 8));
       if (e.type !== 'core' && e.type !== 'pylon') e.m.g.rotation.y = e.yaw;
+      // seekers: a moment to wind up (they glow), then they dive at you and burst
+      if (e.T.seek) {
+        e.arm = (e.arm ?? 0.8) - dt;
+        if (e.arm > 0) { e.m.glow.emissiveIntensity = 3 + 6 * (1 - e.arm / 0.8); e.pos.y = e.home.y + Math.sin(e.t * 9) * 0.08; continue; }
+        e.m.glow.emissiveIntensity = 8;
+        const sp = 12.5 + Math.min(4, -e.arm * 2);
+        e.vel.lerp(_d.copy(dir).multiplyScalar(sp), Math.min(1, dt * 2.6));
+        const step = e.vel.length() * dt;
+        if (dist < 1.2 || rayWorld(c, _w.copy(e.vel).normalize(), boxes, step + e.T.r) < step + e.T.r || e.t > 40) {
+          e.dead = true; e.dieT = 0.9; e.m.g.visible = false; this.boom(c, 2.2, P, e); continue;
+        }
+        e.pos.addScaledVector(e.vel, dt);
+        continue;
+      }
+      // walking wardens: gunners step side to side, shields and heavies close in
+      if (e.T.walk && e.tele <= 0 && e.sees) {
+        let mx = 0, mz = 0;
+        if (e.T.walk === 'strafe') {
+          e.strafeT = (e.strafeT || 0) - dt;
+          if (e.strafeT <= 0) { e.strafeT = 1.1 + Math.random() * 1.4; e.strafe = Math.random() < 0.5 ? -1 : 1; }
+          mx = -dir.z * e.strafe; mz = dir.x * e.strafe;
+        } else if (dist > 8) { const l = Math.hypot(dir.x, dir.z) || 1; mx = dir.x / l; mz = dir.z / l; }
+        if (mx || mz) {
+          const nx = e.pos.x + mx * e.T.pace * dt, nz = e.pos.z + mz * e.T.pace * dt;
+          if (Math.hypot(nx - e.home.x, nz - e.home.z) < 9 && this.canStand(boxes, nx, e.pos.y, nz, e.T.r * 0.7)) { e.pos.x = nx; e.pos.z = nz; e.moving = true; }
+          else if (e.T.walk === 'strafe') e.strafe = -e.strafe;
+        }
+      }
       // movement
       if (e.T.fly) {
         const side = Math.sin(e.t * 0.7) * 3;
@@ -189,7 +262,9 @@ export class Enemies {
           this.dropLaser(e);
           const lead = e.T.speed < 40 ? P.vel.clone().multiplyScalar(dist / e.T.speed * 0.5) : new THREE.Vector3();
           const tgt = eye.clone().add(lead); tgt.y -= 0.25;
-          if (e.type === 'shield') for (let i = 0; i < 3; i++) this.fire(e, c, tgt, e.T.speed, 0.14);
+          if (e.T.lob) this.lob(e, c, P, boxes);
+          else if (e.type === 'heavy') for (let i = -2; i <= 2; i++) this.fire(e, c, _p.copy(tgt).sub(c).applyAxisAngle(_up, i * 0.13).add(c), e.T.speed);
+          else if (e.type === 'shield') for (let i = 0; i < 3; i++) this.fire(e, c, tgt, e.T.speed, 0.14);
           else if (e.type === 'drone') { this.fire(e, c, tgt, e.T.speed); setTimeout(() => !e.dead && P.alive && this.fire(e, this.center(e), P.eye, e.T.speed), 160); }
           else if (e.type === 'pylon') this.fire(e, c, tgt, e.T.speed);
           else if (e.type !== 'core') this.fire(e, c, tgt, e.T.speed, e.type === 'turret' ? 0.05 : 0);
@@ -200,14 +275,15 @@ export class Enemies {
     // bullets
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
-      b.prev.copy(b.pos); b.pos.addScaledVector(b.vel, dt); b.life -= dt;
+      b.prev.copy(b.pos); if (b.g) b.vel.y -= b.g * dt; b.pos.addScaledVector(b.vel, dt); b.life -= dt;
+      if (b.ring) b.ring.scale.setScalar(0.85 + 0.15 * Math.sin(b.life * 18));
       const spd = b.vel.length(), d = _d.copy(b.vel).divideScalar(spd || 1);
       let gone = b.life <= 0 || rayWorld(b.prev, d, boxes, spd * dt) < spd * dt;
       if (b.deflected) {
         for (const e of this.list) if (!e.dead && this.center(e).distanceTo(b.pos) < e.T.r + 0.5) { if (!e.shielded) this.damage(e, e.type === 'pylon' ? 6 : 3, 'deflect'); gone = true; break; }
       } else if (P.alive && segPointDist(b.prev, b.pos, P.pos, P.h) < 0.42) { this.onHit?.(b); gone = true; }
       else if (!b.whiz && P.alive && b.pos.distanceTo(eye) < 2.6) { b.whiz = true; this.onWhiz?.(b); }
-      if (gone) { this.bullets[i] = this.bullets[this.bullets.length - 1]; this.bullets.pop(); if (b.life > 0) { this.spark(b.pos, b.deflected ? 0x5ff8ff : 0xff2040, 5); this.onImpact?.(b.pos); } }
+      if (gone) { this.bullets[i] = this.bullets[this.bullets.length - 1]; this.bullets.pop(); this.dropRing(b); if (b.shell) this.boom(b.pos, 2.5, P, null); else if (b.life > 0) { this.spark(b.pos, b.deflected ? 0x5ff8ff : 0xff2040, 5); this.onImpact?.(b.pos); } }
     }
     for (let i = this.sparks.length - 1; i >= 0; i--) { const s = this.sparks[i]; s.life -= dt; s.v.y -= 14 * dt; s.p.addScaledVector(s.v, dt); if (s.life <= 0) { this.pool.push(s); this.sparks[i] = this.sparks[this.sparks.length - 1]; this.sparks.pop(); } }
     this.draw();
@@ -216,8 +292,8 @@ export class Enemies {
   draw() {
     const S = this.shots, G = this.glow; let n = 0;
     for (const b of this.bullets) {
-      _m.makeTranslation(b.pos.x, b.pos.y, b.pos.z); S.setMatrixAt(n, _m); S.setColorAt(n, b.deflected ? CYAN : CORE_RED); n++;
-      G.put(b.pos.x, b.pos.y, b.pos.z, b.deflected ? CYAN : RED, 1, 1.1);
+      _m.makeTranslation(b.pos.x, b.pos.y, b.pos.z); S.setMatrixAt(n, _m); S.setColorAt(n, b.deflected ? CYAN : b.shell ? SHELL : CORE_RED); n++;
+      G.put(b.pos.x, b.pos.y, b.pos.z, b.deflected ? CYAN : b.shell ? SHELL : RED, 1, b.shell ? 2.4 : 1.1);
     }
     S.count = n; S.instanceMatrix.needsUpdate = true; if (S.instanceColor) S.instanceColor.needsUpdate = true;
     for (const s of this.sparks) G.put(s.p.x, s.p.y, s.p.z, s.c, Math.min(1, s.life * 2), s.size);
@@ -237,7 +313,7 @@ export class Enemies {
       if (d > reach || _w.normalize().dot(fw) < 0.2) continue;
       const tgt = b.from && !b.from.dead ? this.center(b.from) : b.pos.clone().addScaledVector(fw, 30);
       b.vel = tgt.sub(b.pos).normalize().multiplyScalar(Math.max(40, b.vel.length() * 1.4));
-      b.deflected = true; b.life = 3; n++;
+      b.deflected = true; b.life = 3; b.g = 0; this.dropRing(b); n++;
     }
     return n;
   }

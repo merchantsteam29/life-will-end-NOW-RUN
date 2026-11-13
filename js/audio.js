@@ -80,17 +80,22 @@ export const sfx = {
   radio() { noise(0.12, { f: 2000, q: 3, gain: 0.08 }); tone(1800, 0.04, { type: 'square', gain: 0.03 }); },
   type() { tone(1400 + Math.random() * 400, 0.015, { type: 'square', gain: 0.012 }); },
   clear() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.5, { type: 'triangle', gain: 0.1, delay: i * 0.1 })); },
+  hook() { noise(0.2, { f: 1800, f2: 5200, q: 3, gain: 0.22 }); tone(300, 0.25, { type: 'triangle', gain: 0.12, f2: 1300 }); },
+  zip() { noise(0.6, { f: 3400, f2: 2200, q: 6, gain: 0.12 }); tone(900, 0.4, { type: 'sawtooth', gain: 0.03, f2: 1400 }); },
+  boom(p) { const b = at(p, 7); noise(0.7, { f: 500, f2: 80, q: 0.6, type: 'lowpass', gain: 0.7, bus: b }); tone(70, 0.6, { type: 'sine', gain: 0.4, f2: 30, bus: b }); },
+  // an arena locking (or the next wave arriving)
+  lock(next) { tone(next ? 220 : 110, 0.6, { type: 'sawtooth', gain: 0.14, f2: next ? 330 : 55 }); noise(0.4, { f: 400, gain: 0.25, type: 'lowpass' }); if (!next) tone(880, 0.3, { type: 'square', gain: 0.05, delay: 0.15 }); },
   bossHit(p) { const b = at(p, 12); tone(90, 0.8, { type: 'sawtooth', gain: 0.3, f2: 40, bus: b }); noise(0.5, { f: 600, gain: 0.4, bus: b }); },
 };
 
 // ---------- music: a slow synthwave loop (bass, arpeggio, pad), key and tempo per chapter ----------
-const SCALES = { 1: [57, [0, 3, 7, 10]], 2: [55, [0, 3, 7, 12]], 3: [53, [0, 5, 7, 10]], 4: [58, [0, 4, 7, 11]], 5: [50, [0, 3, 7, 10]], 6: [52, [0, 1, 7, 8]], 0: [45, [0, 3, 7, 10]] };
+const SCALES = { 1: [57, [0, 3, 7, 10]], 2: [55, [0, 3, 7, 12]], 3: [53, [0, 5, 7, 10]], 4: [58, [0, 4, 7, 11]], 5: [54, [0, 3, 7, 12]], 6: [56, [0, 4, 7, 9]], 7: [50, [0, 3, 7, 10]], 8: [49, [0, 1, 5, 7]], 9: [52, [0, 1, 7, 8]], 0: [45, [0, 3, 7, 10]] };
 let musicT = null, step = 0;
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
 export function music(id, intensity = 1) {
   if (musicT) { clearInterval(musicT); musicT = null; }
   if (!ac || id == null) return;
-  const [root, iv] = SCALES[id] || SCALES[0], bpm = id === 6 ? 128 : id === 0 ? 84 : 112, sixteenth = 60 / bpm / 4;
+  const [root, iv] = SCALES[id] || SCALES[0], bpm = id === 9 ? 128 : id === 8 ? 120 : id === 0 ? 84 : 112, sixteenth = 60 / bpm / 4;
   const prog = [0, -4, -2, -5];
   step = 0;
   musicT = setInterval(() => {

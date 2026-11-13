@@ -63,6 +63,7 @@ export function buildWorld(scene, L, ch) {
     [KIND.bar]: new THREE.MeshStandardMaterial({ map: T.hazard, roughness: 0.6 }),
     [KIND.pad]: new THREE.MeshStandardMaterial({ color: 0x111111, emissive: accent, emissiveIntensity: 2.2 }),
     [KIND.deco]: new THREE.MeshStandardMaterial({ color: 0x15141a, roughness: 0.9 }),
+    [KIND.glass]: new THREE.MeshStandardMaterial({ color: 0x9fdcff, emissive: accent.clone().multiplyScalar(0.12), transparent: true, opacity: 0.32, roughness: 0.05, metalness: 0.6, depthWrite: false, forceSinglePass: true }),
   };
   const edgeMat = new THREE.MeshBasicMaterial({ color: neon });
   const byKind = new Map(), edges = [];
@@ -72,7 +73,7 @@ export function buildWorld(scene, L, ch) {
     if (!byKind.has(k)) byKind.set(k, []);
     byKind.get(k).push(boxGeo(b));
     // a neon strip along the long edges of every walkable top
-    if (k === KIND.floor) {
+    if (k === KIND.floor || k === KIND.glass) {
       const sx = b.max[0] - b.min[0], sz = b.max[2] - b.min[2], y = b.max[1] + 0.02;
       if (sz >= sx) for (const x of [b.min[0] + 0.06, b.max[0] - 0.06]) edges.push(boxGeo({ min: [x - 0.05, y - 0.04, b.min[2]], max: [x + 0.05, y + 0.02, b.max[2]] }));
       else for (const z of [b.min[2] + 0.06, b.max[2] - 0.06]) edges.push(boxGeo({ min: [b.min[0], y - 0.04, z - 0.05], max: [b.max[0], y + 0.02, z + 0.05] }));
@@ -112,7 +113,7 @@ export function buildWorld(scene, L, ch) {
   for (const sg of L.signs) {
     const tex = canvasTex(512, 128, (g, w, h) => { g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, w, h); g.font = '900 78px "Segoe UI", system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = sg.color; g.shadowBlur = 24; g.fillStyle = sg.color; g.fillText(sg.text, w / 2, h / 2); g.fillStyle = '#fff'; g.globalAlpha = 0.6; g.fillText(sg.text, w / 2, h / 2); }, false);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(sg.size * 4, sg.size), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
-    m.position.set(...sg.p); m.rotation.y = sg.p[0] < 0 ? Math.PI / 2 : -Math.PI / 2; root.add(m);
+    m.position.set(...sg.p); m.rotation.y = sg.yaw ?? (sg.p[0] < 0 ? Math.PI / 2 : -Math.PI / 2); root.add(m);
   }
   // exit beacon
   let exit = null;
@@ -123,6 +124,33 @@ export function buildWorld(scene, L, ch) {
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 60, 24, 1, true), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true }));
     beam.position.y = 30; exit.add(beam);
     exit.position.set(...L.exit.p); root.add(exit); exit.userData.ring = ring;
+  }
+  // lock-in gates: walls of light, shown only while an arena is shut
+  const gateMat = new THREE.MeshBasicMaterial({ color: neon, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, blending: THREE.AdditiveBlending });
+  const gateEdge = new THREE.MeshBasicMaterial({ color: neon });
+  for (const b of L.gates || []) {
+    const g = new THREE.Group(), sx = b.max[0] - b.min[0], sy = b.max[1] - b.min[1], sz = b.max[2] - b.min[2];
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), gateMat));
+    for (const y of [0.1, sy - 0.1, sy * 0.5]) g.add(new THREE.Mesh(new THREE.BoxGeometry(sx + 0.05, 0.08, sz + 0.05), gateEdge)).position.y = y - sy / 2;
+    g.position.set((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2); g.visible = false; root.add(g); b.mesh = g;
+  }
+  // grapple rings: a glowing hoop on a cable from the sky, always turned to face you
+  const hookMat = new THREE.MeshBasicMaterial({ color: accent }), hookCore = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const hookGeo = new THREE.TorusGeometry(0.62, 0.07, 8, 28), coreGeo = new THREE.OctahedronGeometry(0.22), cableGeo = new THREE.CylinderGeometry(0.025, 0.025, 40, 5);
+  const cableMat = new THREE.MeshBasicMaterial({ color: 0x3a4058 });
+  const hooks = (L.hooks || []).map((h) => {
+    const g = new THREE.Group(); g.position.set(...h.p);
+    const ring = new THREE.Mesh(hookGeo, hookMat); g.add(ring); const core = new THREE.Mesh(coreGeo, hookCore); g.add(core);
+    const cab = new THREE.Mesh(cableGeo, cableMat); cab.position.y = 20.6; g.add(cab);
+    root.add(g); h.mesh = g; g.userData = { ring, core }; return g;
+  });
+  // ziplines: a lit cable with a clamp at each end
+  const zipMat = new THREE.MeshBasicMaterial({ color: accent.clone().multiplyScalar(0.55) }), clampMat = new THREE.MeshStandardMaterial({ color: 0x2a2e3a, roughness: 0.5, metalness: 0.6 });
+  for (const z of L.zips || []) {
+    const a = new THREE.Vector3(...z.a), b = new THREE.Vector3(...z.b), len = a.distanceTo(b);
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, len, 6), zipMat);
+    c.position.copy(a).add(b).multiplyScalar(0.5); c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()); root.add(c);
+    for (const p of [a, b]) { const k = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), clampMat); k.position.copy(p); root.add(k); const up = new THREE.Mesh(cableGeo, cableMat); up.position.set(p.x, p.y + 20, p.z); root.add(up); }
   }
   // checkpoints: small floor lights
   const cps = L.checkpoints.map((c) => {
@@ -151,8 +179,14 @@ export function buildWorld(scene, L, ch) {
   scene.fog = new THREE.FogExp2(ch.fog[0], ch.fog[1]);
 
   return {
-    root, solid, movers, exit, cps, rain,
+    root, solid, movers, exit, cps, rain, hooks,
+    // show the gates that are shut
+    setGates(list) { for (const b of L.gates || []) b.mesh.visible = list.includes(b); },
+    // the ring you'd hook right now glows brighter
+    setHook(h) { for (const x of L.hooks || []) { const on = x === h; x.mesh.userData.ring.scale.setScalar(on ? 1.25 : 1); x.mesh.userData.core.scale.setScalar(on ? 1.5 : 1); } },
     update(t, dt, camPos) {
+      for (const g of hooks) { g.userData.ring.lookAt(camPos); g.userData.core.rotation.y = t * 2; }
+      gateMat.opacity = 0.18 + Math.sin(t * 6) * 0.06;
       for (const b of movers) {
         const mv = b.mover, o = Math.sin((t + mv.ph) * Math.PI * 2 / mv.period) * mv.amp, ax = mv.axis === 'x' ? 0 : mv.axis === 'y' ? 1 : 2;
         const before = b.min[ax];

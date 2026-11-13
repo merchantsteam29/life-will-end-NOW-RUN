@@ -87,6 +87,11 @@ h2 { font: 800 30px var(--f-head); letter-spacing: .12em; margin: 0 0 4px; color
 #intro .sb { font-size: 20px; color: var(--dim); letter-spacing: .1em; }
 #hint { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); font: 600 18px var(--f-body); color: #fff; text-shadow: 0 0 8px #000; letter-spacing: .05em; opacity: 0; transition: opacity .3s; text-align: center; }
 #hint.on { opacity: .95; }
+#wave { position: absolute; top: 92px; left: 50%; transform: translateX(-50%); font: 800 14px var(--f-head); letter-spacing: .25em; color: var(--pink); text-shadow: 0 0 10px var(--pink); opacity: 0; transition: opacity .3s; white-space: nowrap; }
+#wave.on { opacity: 1; }
+#hookMark { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border: 2px solid var(--cyan); border-radius: 50%; box-shadow: 0 0 12px var(--cyan), inset 0 0 8px var(--cyan); opacity: 0; transition: opacity .12s; }
+#hookMark::after { content: attr(data-k); position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 4px; font: 800 11px var(--f-head); letter-spacing: .15em; color: var(--cyan); white-space: nowrap; }
+#hookMark.on { opacity: .95; }
 #boss { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); width: min(460px, 70vw); text-align: center; }
 #boss small { font: 700 12px var(--f-head); letter-spacing: .35em; color: var(--pink); }
 #boss div { height: 6px; background: rgba(255,255,255,.1); margin-top: 4px; }
@@ -118,6 +123,7 @@ body.m-touch.playing #touch { display: block; }
 .tb[data-t=dash] { right: max(28px, env(safe-area-inset-right)); bottom: 28px; width: 72px; height: 72px; }
 .tb[data-t=slide] { right: max(220px, calc(env(safe-area-inset-right) + 194px)); bottom: 28px; width: 62px; height: 62px; }
 .tb[data-t=focus] { right: max(40px, env(safe-area-inset-right)); bottom: 226px; width: 58px; height: 58px; border-color: var(--gold); }
+.tb[data-t=hook] { right: max(124px, calc(env(safe-area-inset-right) + 98px)); bottom: 218px; width: 60px; height: 60px; border-color: var(--cyan); }
 .tb[data-t=pause] { right: max(18px, env(safe-area-inset-right)); top: 10px; width: 44px; height: 44px; border-radius: 10px; font-size: 14px; }
 body.m-touch #focus { bottom: auto; top: 46px; left: 18px; width: 130px; }
 body.m-touch #ammo { right: auto; left: 18px; top: 92px; bottom: auto; }
@@ -148,13 +154,15 @@ body.m-keys .only-keys, body.m-pad .only-pad, body.m-touch .only-touch { display
   <div id="tZone"></div>
   <div id="tStick"><div id="tKnob"></div></div>
   <div class="tb" data-t="fire">FIRE</div><div class="tb" data-t="jump">JUMP</div><div class="tb" data-t="blade">BLADE</div>
-  <div class="tb" data-t="dash">DASH</div><div class="tb" data-t="slide">SLIDE</div><div class="tb" data-t="focus">FOCUS</div><div class="tb" data-t="pause">II</div>
+  <div class="tb" data-t="dash">DASH</div><div class="tb" data-t="slide">SLIDE</div><div class="tb" data-t="focus">FOCUS</div><div class="tb" data-t="hook">HOOK</div><div class="tb" data-t="pause">II</div>
 </div>
 <div id="rotate"><div><b>TURN YOUR PHONE SIDEWAYS</b>The Spire is wider than it is tall.</div></div>
 <div id="hud" hidden>
   <div id="chapLbl"></div><div id="timer">0:00.0</div><div id="deaths"></div>
   <div id="cross"></div>
   <div id="boss" hidden><small>HALCYON</small><div><b id="bossBar"></b></div></div>
+  <div id="wave"></div>
+  <div id="hookMark" data-k="HOOK"></div>
   <div id="hint"></div>
   <div id="radio"><b id="radioWho"></b><span id="radioTxt"></span></div>
   <div id="focus"><small id="focusLbl">FOCUS [Q]</small><div><b id="focusBar"></b></div></div>
@@ -195,6 +203,8 @@ body.m-keys .only-keys, body.m-pad .only-pad, body.m-touch .only-touch { display
       <dt>Shift</dt><dd>Dash where you're going, once per jump</dd>
       <dt>Left click</dt><dd>Shoot (6 shots; blade kills give 2 back)</dd>
       <dt>Right click</dt><dd>Blade: kills up close, and swung as a shot arrives it sends the shot back</dd>
+      <dt>E / middle click</dt><dd>Grapple: look at a glowing ring and hook on. It pulls you in and throws you on</dd>
+      <dt>Jump into a cable</dt><dd>Ride the zipline. Jump to let go</dd>
       <dt>Q (hold)</dt><dd>Focus: time slows; kills refill it</dd>
       <dt>R</dt><dd>Back to the last checkpoint</dd>
       <dt>Esc</dt><dd>Pause</dd>
@@ -203,8 +213,8 @@ body.m-keys .only-keys, body.m-pad .only-pad, body.m-touch .only-touch { display
     <dl class="padmap" id="padMap"></dl>
     <p class="small">Works with Xbox, PlayStation (DualShock 4 / DualSense), Steam Deck and Steam Controller pads. The button names change to match the pad you're holding.</p>
     <h2 style="font-size:20px;margin-top:6px">TOUCH SCREEN</h2>
-    <p class="small" style="text-align:left">Left thumb anywhere on the left: move. Drag on the right: look (you can drag across FIRE too). Buttons: JUMP, SLIDE (hold), DASH, FIRE (hold), BLADE, FOCUS (hold). Turn your phone sideways.</p>
-    <p class="small">One hit and you're down, but you're straight back at the last checkpoint. Theirs is one hit too.</p>
+    <p class="small" style="text-align:left">Left thumb anywhere on the left: move. Drag on the right: look (you can drag across FIRE too). Buttons: JUMP, SLIDE (hold), DASH, FIRE (hold), BLADE, HOOK (grapple), FOCUS (hold). Turn your phone sideways.</p>
+    <p class="small">One hit and you're down, but you're straight back at the last checkpoint. Theirs is one hit too (heavies take three bullets, or one cut). When an arena locks, every wave has to go before the gates open.</p>
     <div class="row"><button data-back>Back</button></div>
   </div>
 </div>

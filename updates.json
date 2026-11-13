@@ -1,5 +1,21 @@
 [
   {
+    "version": "2.0",
+    "date": "2026-11-12",
+    "title": "Longer runs, three new chapters, the grapple",
+    "notes": [
+      "Three new chapters: The Drowned Line (the flooded metro), Glasshouse (the hanging gardens) and The Choir (inside the Spire, three lock-in halls back to back). Nine chapters now.",
+      "Every chapter is about three times longer, and the routes turn corners, climb and drop instead of running in one straight line.",
+      "Grapple: look at a glowing ring and press E (middle click, Y / triangle, or HOOK on touch). It pulls you in and throws you on.",
+      "Ziplines: jump up into a cable and ride it. Jump to let go.",
+      "Lock-in arenas: energy gates shut behind you and the wardens come in waves. Clear every wave to open the way.",
+      "New wardens: Heavies (armoured, take three bullets or one cut, fire a 5-shot spread), Seekers (small drones that dive at you and burst) and Mortars (a red ring on the ground shows where the shell lands; shells hurt wardens too).",
+      "Harder fights: gunners strafe while they shoot, shields and heavies walk at you, and everyone fires a bit faster.",
+      "HALCYON calls down seekers every time you break a pylon.",
+      "Your unlocked chapters carry over. Best times start fresh, since the chapters are new lengths."
+    ]
+  },
+  {
     "version": "1.2.1",
     "date": "2026-11-11",
     "title": "Smoother fights",

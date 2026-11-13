@@ -153,6 +153,37 @@ const BUILD = {
   sniper: () => humanoid({ role: 'sniper', tall: 1.1, bulk: 0.95, gun: 'long' }).done(),
   shield: () => { const K = humanoid({ role: 'shield', bulk: 1.16, gun: 'smg' }); shieldPlate(K); return K.done(); },
   charger: () => humanoid({ role: 'charger', tall: 0.88, bulk: 1.05 }).done(),
+  heavy() {
+    const K = humanoid({ role: 'heavy', bulk: 1.38, tall: 1.12, gun: 'smg' });
+    // extra armour: a chest slab, a collar and a drum magazine
+    K.add(G.box(0.56, 0.4, 0.12), 'plate', 0, 0.4, -0.2, -0.12).add(G.box(0.4, 0.035, 0.03), 'glow', 0, 0.48, -0.27, -0.12)
+      .add(G.tor(0.2, 0.06, 6, 16), 'dark', 0, 0.64, 0, PI / 2).add(G.cyl(0.11, 0.11, 0.12, 12), 'dark', 0.15, 0.2, -0.42, 0, 0, PI / 2)
+      .add(G.box(0.46, 0.5, 0.22), 'dark', 0, 0.42, 0.26).add(G.cyl(0.05, 0.05, 0.4, 8), 'glow', 0.14, 0.45, 0.4).add(G.cyl(0.05, 0.05, 0.4, 8), 'glow', -0.14, 0.45, 0.4);
+    return K.done();
+  },
+  seeker() {
+    const K = kit();
+    K.part('body', 0, 0, 0);
+    K.add(G.sph(0.3, 16, 12), 'plate', 0, 0, 0).add(G.sph(0.22, 12, 8), 'glow', 0, 0, -0.14)
+      .add(G.tor(0.34, 0.03, 6, 24), 'dark', 0, 0, 0, PI / 2);
+    for (let i = 0; i < 6; i++) { const a = i * PI / 3; K.add(G.cone(0.07, 0.34, 5), 'trim', Math.cos(a) * 0.32, Math.sin(a) * 0.32, 0.02, 0, 0, a - PI / 2); }
+    K.add(G.cone(0.1, 0.36, 6), 'dark', 0, 0, 0.36, PI / 2);
+    K.part('ring', 0, 0, 0, 'body');
+    K.add(G.tor(0.5, 0.02, 4, 28), 'glow', 0, 0, 0, PI / 2 + 0.4);
+    return K.done();
+  },
+  mortar() {
+    const K = kit();
+    K.part('base', 0, 0, 0);
+    K.add(G.cyl(0.8, 0.95, 0.4, 8), 'dark', 0, 0.2, 0).add(G.tor(0.78, 0.03, 4, 32), 'glow', 0, 0.42, 0, PI / 2)
+      .add(G.cyl(0.42, 0.55, 0.4, 8), 'plate', 0, 0.6, 0);
+    for (let i = 0; i < 3; i++) { const a = i * PI * 2 / 3; limb(K, 'body', [Math.cos(a) * 0.5, 0.3, Math.sin(a) * 0.5], [Math.cos(a) * 1.1, 0, Math.sin(a) * 1.1], 0.06); }
+    K.part('tube', 0, 0.85, 0, 'base');
+    K.add(G.cyl(0.26, 0.3, 1.2, 12), 'plate', 0, 0.45, -0.25, -0.5).add(G.cyl(0.2, 0.2, 0.05, 12), 'glow', 0, 1.0, -0.55, -0.5)
+      .add(G.tor(0.29, 0.04, 6, 16), 'dark', 0, 0.75, -0.4, PI / 2 - 0.5).add(G.box(0.5, 0.3, 0.4), 'dark', 0, 0, 0.1)
+      .add(G.box(0.3, 0.04, 0.03), 'glow', 0, 0.05, -0.12);
+    return K.done();
+  },
   drone() {
     const K = kit();
     K.part('body', 0, 0, 0);
@@ -260,6 +291,8 @@ const ANIM = {
     if (e.type === 'sniper' && e.tele > 0) P.upper.rotation.x -= 0.04;
   },
   drone(e, dt) { const P = e.m.parts; P.ring.rotation.y += dt * (e.tele > 0 ? 12 : 4); P.body.rotation.x = THREE.MathUtils.clamp(-(e.pitch || 0), -0.5, 0.5) + Math.sin(e.t * 1.3) * 0.06; P.body.rotation.z = Math.sin(e.t * 0.7) * 0.15; },
+  seeker(e, dt) { const P = e.m.parts; P.body.rotation.z += dt * (e.arm > 0 ? 3 : 14); P.ring.rotation.y += dt * 6; },
+  mortar(e, dt) { const P = e.m.parts; e.kick = Math.max(0, (e.kick || 0) - dt * 4); P.tube.position.y = 0.85 - e.kick * 0.12; P.tube.rotation.x = e.tele > 0 ? -0.08 : 0; },
   turret(e, dt) { const P = e.m.parts; e.kick = Math.max(0, (e.kick || 0) - dt * 10); P.head.rotation.x = THREE.MathUtils.clamp(-(e.pitch || 0), -0.5, 0.6); P.head.position.z = e.kick * 0.05; },
   pylon(e, dt) { const P = e.m.parts; P.crystal.rotation.y += dt * 1.5; P.crystal.position.y = 2.25 + Math.sin(e.t * 2) * 0.12; P.rings.rotation.y -= dt * 0.9; P.rings.rotation.z = Math.sin(e.t * 0.8) * 0.3; },
   core(e, dt) {
